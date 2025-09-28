@@ -1,2 +1,2 @@
 # GPT-NLP-Lab-Assistant-4
-Hello World.
+This is the data repository for the EE-Assistant project.
