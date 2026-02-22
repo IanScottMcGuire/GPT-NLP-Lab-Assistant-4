@@ -7,7 +7,7 @@ import time
 from roboflow import Roboflow
 
 # Initialize Roboflow model
-rf = Roboflow(api_key="hFyT16eNtzwRsmbWtu97")
+rf = Roboflow(api_key= os.getenv("RoboFlow_KEY"))
 project = rf.workspace("gptnlplabassistant4").project("components-model-v2tgx")
 model = project.version("4").model
 
