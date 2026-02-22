@@ -83,7 +83,7 @@ const int POST_HIT_ESCAPE_STEPS    = 30;
 //                SINGLE "OFFSET KNOB" (DEGREES)
 // ============================================================
 
-const float INDEX_TO_STOP_DEG = 31.0f;
+const float INDEX_TO_STOP_DEG = 30.0f;
 const float TRIM_DEG          = -18.0f;
 
 // ============================================================
@@ -108,7 +108,7 @@ const float US_TRIM_FRACTION = 0.20f;
 //            INVENTORY THRESHOLD (TUNABLE, CM)
 // ============================================================
 
-const float INVENTORY_THRESH_CM = 12.0f;
+const float INVENTORY_THRESH_CM = 11.8f;
 
 // ============================================================
 //                      UART1 (JETSON) SETUP
