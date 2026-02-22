@@ -108,7 +108,7 @@ const float US_TRIM_FRACTION = 0.20f;
 //            INVENTORY THRESHOLD (TUNABLE, CM)
 // ============================================================
 
-const float INVENTORY_THRESH_CM = 11.8f;
+const float INVENTORY_THRESH_CM = 11.9f;
 
 // ============================================================
 //                      UART1 (JETSON) SETUP
