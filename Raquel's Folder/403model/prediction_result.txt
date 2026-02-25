@@ -1,1 +1,1 @@
-none,0.0000
+Ceramic Capacitor,0.6408
