@@ -1,44 +1,47 @@
-import os #reads all files in ECEN 214
-from PyPDF2 import PdfReader #library for reading and extracting text from the files
-from sentence_transformers import SentenceTransformer #load pretrained embedding model
+# build_index.py
+import os
+import pickle
 import faiss
-import numpy as np
+from sentence_transformers import SentenceTransformer
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.document_loaders import PyPDFLoader, TextLoader
 
+DOCS_PATH = "documents"
+INDEX_PATH = "index/vector_index.pkl"
+MODEL_NAME = "all-MiniLM-L6-v2"
 
-model = SentenceTransformer("all-MiniLM-L6-v2") #embedding model
+def load_documents():
+    docs = []
+    for filename in os.listdir(DOCS_PATH):
+        path = os.path.join(DOCS_PATH, filename)
+        if filename.endswith(".pdf"):
+            loader = PyPDFLoader(path)
+            docs.extend(loader.load())
+        elif filename.endswith(".txt"):
+            loader = TextLoader(path)
+            docs.extend(loader.load())
+    return docs
 
+def build_index():
+    print("Loading documents")
+    docs = load_documents()
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=150)
+    splits = text_splitter.split_documents(docs)
 
-docs_folder = "ECEN 214" #load all PDFs from ECEN 214 folder
-all_chunks = [] #chunks of text list
-doc_sources = [] #source list (where each chunk came from) 
+    print("Generating embeddings")
+    model = SentenceTransformer(MODEL_NAME)
+    texts = [chunk.page_content for chunk in splits]
+    embeddings = model.encode(texts)
 
-#loop for all files in ECEN 214 folder
-for file_name in os.listdir(docs_folder):
-        file_path = os.path.join(docs_folder, file_name) #filepath
-        reader = PdfReader(file_path) #open pdf
-        text = " ".join([page.extract_text() or "" for page in reader.pages]) #extract text and join into one string
+    print("Saving FAISS index")
+    index = faiss.IndexFlatL2(embeddings.shape[1])
+    index.add(embeddings)
 
-        # Split text into 500 character chunks
-        chunks = [text[i:i+500] for i in range(0, len(text), 500)]
-        all_chunks.extend(chunks) #add chunks to list
-        doc_sources.extend([file_name] * len(chunks))  # track source doc
-        print(f"Loaded {len(chunks)} chunks from {file_name}") #track progress
+    os.makedirs("index", exist_ok=True)
+    with open(INDEX_PATH, "wb") as f:
+        pickle.dump((index, texts), f)
 
+    print(f"Index built and saved to {INDEX_PATH}")
 
-#FAISS index - vector DB
-embeddings = model.encode(all_chunks) #convert text chunks into vectors
-dim = embeddings.shape[1] #vector dimension (MiniLM = 384)
-index = faiss.IndexFlatL2(dim) #initialize FAISS index
-index.add(np.array(embeddings)) #add embeddings into FAISS index
-
-print("FAISS Database loaded with", len(all_chunks), "chunks")
-
-# Save to disk
-faiss.write_index(index, "ecen214.index") #save FAISS index
-np.save("ecen214_chunks.npy", np.array(all_chunks, dtype=object)) #save chunk into list using numpy
-np.save("ecen214_sources.npy", np.array(doc_sources, dtype=object)) #save sources into list using numpy
-
-print("Saved FAISS index + chunks + sources")
-
-
-
+if __name__ == "__main__":
+    build_index()
