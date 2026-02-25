@@ -413,8 +413,8 @@ detector.set_output_block_message("Output blocked: {matched_keywords}")
 # ═══════════════════════════════════════════════════════════
 
 # Path to the camera vision script (same folder as this file)
-VISION_SCRIPT      = "/HOME/am1/camera_local.py"
-VISION_RESULT_FILE = "/HOME/am1/prediction_results.txt"
+VISION_SCRIPT      = "/home/am1/GPT-NLP-Lab-Assistant-4/Raquel's Folder/403model/camera_local.py"
+VISION_RESULT_FILE = "/home/am1/GPT-NLP-Lab-Assistant-4/Raquel's Folder/403model/prediction_result.txt"
 
 
 def scan_component() -> dict:

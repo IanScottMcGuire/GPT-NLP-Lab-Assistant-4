@@ -1,5 +1,6 @@
 import sqlite3
 import bcrypt
+import os
 
 # Connect to a database
 connection = sqlite3.connect('testDB.db')
@@ -37,12 +38,16 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS activity_logs(
                access_req TEXT, 
                datetime TEXT)''')
 
-# create 1 test superuser in users table
-# FIXME: update this to create a default admin user
-# hashed = bcrypt.hashpw(default_password.encode(), bcrypt.gensalt())
+# create a default admin user in users table
+admin_password = os.environ.get("ADMIN_PASSWORD")
+if not admin_password:
+    raise ValueError("ADMIN_PASSWORD environment variable is not set")
+
+hashed = bcrypt.hashpw(admin_password.encode(), bcrypt.gensalt()).decode()
+
 cursor.execute('''INSERT INTO users(username, password, refill_perm, admin_perm)
-                VALUES ('superuser', 'testPW', 1, 1)
-                ON CONFLICT(username) DO NOTHING''')
+                VALUES ('superuser', ?, 1, 1)
+                ON CONFLICT(username) DO NOTHING''', (hashed,))
 
 
 

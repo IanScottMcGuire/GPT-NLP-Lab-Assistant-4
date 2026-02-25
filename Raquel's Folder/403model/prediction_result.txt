@@ -1,1 +1,1 @@
-Ceramic Capacitor,0.6408
+Potentiometer 63.24%
