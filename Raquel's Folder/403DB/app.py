@@ -1,9 +1,12 @@
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify
 import sqlite3
+import csv
 import os
 import signal
 from datetime import timedelta, datetime
 from functools import wraps
+
+CSV_PATH = "/home/am1/CAPSTONE/inventory_log.csv"
 
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-change-in-production'
@@ -11,9 +14,60 @@ app.permanent_session_lifetime = timedelta(minutes=15)
 
 
 def get_db_connection():
-    conn = sqlite3.connect('testDB.db')
+    # timeout=30 and WAL mode allow concurrent access with testDB.py without locking errors
+    conn = sqlite3.connect('testDB.db', timeout=30)
+    conn.execute('PRAGMA journal_mode=WAL')
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def sync_inventory_from_csv():
+    """Read the CV inventory log and update the inventory table with the latest entry per bin."""
+    if not os.path.exists(CSV_PATH):
+        return
+
+    latest_by_bin = {}
+    with open(CSV_PATH, newline='') as csvfile:
+        reader = csv.DictReader(csvfile)
+        for row in reader:
+            bin_id = int(row['bin'])
+            timestamp_str = row['timestamp']
+            result_str = row['result'].strip().upper()
+
+            if bin_id not in latest_by_bin:
+                latest_by_bin[bin_id] = (timestamp_str, result_str)
+            else:
+                existing_ts = datetime.strptime(latest_by_bin[bin_id][0], "%Y-%m-%d %H:%M:%S")
+                new_ts = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
+                if new_ts > existing_ts:
+                    latest_by_bin[bin_id] = (timestamp_str, result_str)
+
+    conn = get_db_connection()
+    try:
+        for bin_id, (csv_ts_str, csv_result_str) in latest_by_bin.items():
+            csv_quantity = 0 if csv_result_str == 'LO' else 1
+            csv_ts = datetime.strptime(csv_ts_str, "%Y-%m-%d %H:%M:%S")
+
+            row = conn.execute(
+                'SELECT quantity, datetime FROM inventory WHERE bin_id = ?', (bin_id,)
+            ).fetchone()
+
+            if row is None:
+                conn.execute(
+                    'INSERT INTO inventory(bin_id, component, quantity, datetime) VALUES (?, ?, ?, ?)',
+                    (bin_id, '', csv_quantity, csv_ts_str)
+                )
+            else:
+                db_datetime_str = row['datetime']
+                db_ts = datetime.strptime(db_datetime_str, "%Y-%m-%d %H:%M:%S") if db_datetime_str else None
+                if db_ts is None or (csv_ts > db_ts and csv_quantity != row['quantity']):
+                    conn.execute(
+                        'UPDATE inventory SET quantity = ?, datetime = ? WHERE bin_id = ?',
+                        (csv_quantity, csv_ts_str, bin_id)
+                    )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def login_required(f):
@@ -132,6 +186,9 @@ def view_table(table_name):
         return "Access denied", 403
 
     log_activity(session['username'], f"Viewed table {table_name}")
+
+    if table_name == 'inventory':
+        sync_inventory_from_csv()
 
     conn = get_db_connection()
 
