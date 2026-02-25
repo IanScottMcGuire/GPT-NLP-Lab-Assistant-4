@@ -1,5 +1,7 @@
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify
 import sqlite3
+import os
+import signal
 from datetime import timedelta, datetime
 from functools import wraps
 
@@ -93,6 +95,12 @@ def create_account():
     return render_template('create_account.html')
 
 
+@app.route('/shutdown', methods=['POST'])
+def shutdown():
+    os.kill(os.getpid(), signal.SIGINT)
+    return 'Server shutting down...'
+
+
 @app.route('/logout')
 def logout():
     if 'username' in session:
@@ -132,6 +140,8 @@ def view_table(table_name):
 
     if table_name == 'activity_logs':
         rows = conn.execute(f'SELECT * FROM {table_name} ORDER BY datetime DESC').fetchall()
+    elif table_name == 'inventory':
+        rows = conn.execute(f'SELECT * FROM {table_name} ORDER BY bin_id ASC').fetchall()
     else:
         rows = conn.execute(f'SELECT * FROM {table_name}').fetchall()
     conn.close()

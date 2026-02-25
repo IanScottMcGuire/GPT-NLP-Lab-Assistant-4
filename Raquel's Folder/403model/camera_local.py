@@ -77,6 +77,7 @@ def run_inference(frame):
             "confidence": CONFIDENCE,
             "iou_threshold": IOU_THRESHOLD,
         },
+        headers={"Expect": ""},
         timeout=10,
     )
     resp.raise_for_status()

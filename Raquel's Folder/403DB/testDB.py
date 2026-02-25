@@ -1,4 +1,5 @@
 import sqlite3
+import bcrypt
 
 # Connect to a database
 connection = sqlite3.connect('testDB.db')
@@ -22,7 +23,8 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS users(
 cursor.execute('''CREATE TABLE IF NOT EXISTS inventory(
                bin_id INTEGER UNIQUE NOT NULL, 
                component TEXT NOT NULL, 
-               quantity INTEGER NOT NULL)''') # 0 = low, 1 = high
+               quantity INTEGER NOT NULL,
+               datetime TEXT)''') # 0 = low, 1 = high
 
 # create api key table, only admin_perm should have access
 cursor.execute('''CREATE TABLE IF NOT EXISTS api_keys(
@@ -36,197 +38,73 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS activity_logs(
                datetime TEXT)''')
 
 # create 1 test superuser in users table
+# FIXME: update this to create a default admin user
+# hashed = bcrypt.hashpw(default_password.encode(), bcrypt.gensalt())
 cursor.execute('''INSERT INTO users(username, password, refill_perm, admin_perm)
-               VALUES ('superuser', 'testPW', 1, 1)
-               ON CONFLICT(username) DO NOTHING''')
+                VALUES ('superuser', 'testPW', 1, 1)
+                ON CONFLICT(username) DO NOTHING''')
 
-# add 4 bins and test data to inventory table
-cursor.execute('''INSERT INTO inventory(bin_id, component, quantity)
-               VALUES ('1', 'Resistor - 1k', 1),
-               ('2', 'Capacitor - 10uF', 1),
-               ('3', 'Op Amp', 1),
-               ('4', 'LED - Red', 1)
-               ON CONFLICT(bin_id) DO NOTHING''')
+
+
 
 connection.commit()
 
-# -----START OF CODE-----
-
-# take user input from console to request access to view/edit a table
-
-# check user permissions, block request if user doesn't have correct perms
-
-# take user input to edit table
-
-# -----END OF CODE-----
-
-
-# -----START OF CODE-----
-# FIXME - add table requested and actions performed to activity_logs table
-# take user input from console to request access to view/edit a table
-username = input("Enter username: ")
-password = input("Enter password: ")
-table_name = input("Enter table name to access (users/inventory/api_keys/activity_logs): ")
-
-# FIXME: move permission check AFTER valid user check
-# check user permissions, block request if user doesn't have correct perms
-cursor.execute('SELECT refill_perm, admin_perm FROM users WHERE username = ? AND password = ?',
-               (username, password))
-user = cursor.fetchone()
-
-if user is None:
-    print("Invalid username or password")
-    cursor.execute('INSERT INTO activity_logs VALUES (?, ?, datetime("now", "localtime")))',
-                   (username, f"Failed login attempt for {table_name}"))
-    connection.commit()
-else:
-    # FIXME: add activity logging for successful login
-    cursor.execute('INSERT INTO activity_logs VALUES (?, ?, datetime("now", "localtime")))',
-                   (username, f"Logged in"))
-    connection.commit()
-
-    refill_perm, admin_perm = user
-
-    # Check permissions based on table
-    access_granted = False
-    if table_name == 'users' or table_name == 'api_keys':
-        access_granted = (admin_perm == 1)
-    elif table_name == 'inventory':
-        access_granted = (refill_perm == 1 or admin_perm == 1)
-    elif table_name == 'activity_logs':
-        access_granted = True
-
-
-    if not access_granted:
-        # Log the access request
-        cursor.execute('INSERT INTO activity_logs VALUES (?, ?, datetime("now", "localtime"))',
-                       (username, f"Access denied for {table_name}"))
-        connection.commit()
-        print(f"Access denied. You don't have permission to access {table_name}")
-    else:
-        print(f"Access granted to {table_name}")
-
-        # take user input to edit table
-        action = input("Enter action (view/insert/update/delete): ")
-
-        if action == 'view':
-            cursor.execute(f'SELECT * FROM {table_name}')
-            rows = cursor.fetchall()
-            for row in rows:
-                print(row)
-            # Log the view request
-            cursor.execute('INSERT INTO activity_logs VALUES (?, ?, datetime("now", "localtime"))',
-                           (username, f"Viewed {table_name}"))
-            connection.commit()
-
-        elif action == 'insert':
-            if table_name == 'users':
-                u = input("Username: ")
-                p = input("Password: ")
-                r = int(input("Refill permission (0/1): "))
-                a = int(input("Admin permission (0/1): "))
-                cursor.execute('INSERT INTO users VALUES (?, ?, ?, ?)', (u, p, r, a))
-            elif table_name == 'inventory':
-                b = int(input("Bin ID: "))
-                c = input("Component: ")
-                q = int(input("Quantity (Low - 0/High - 1): "))
-                cursor.execute('INSERT INTO inventory VALUES (?, ?, ?)', (b, c, q))
-            elif table_name == 'api_keys':
-                s = input("Service: ")
-                k = input("API Key: ")
-                cursor.execute('INSERT INTO api_keys VALUES (?, ?)', (s, k))
-            connection.commit()
-            # Log the insert request
-            cursor.execute('INSERT INTO activity_logs VALUES (?, ?, datetime("now", "localtime"))',
-                           (username, f"Data inserted in {table_name}"))
-            connection.commit()
-            print("Record inserted")
-
-        elif action == 'update':
-            print("Specify your update query")
-            # Basic example for inventory
-            if table_name == 'inventory':
-                bin_id = int(input("Enter bin_id to update: "))
-                new_qty = int(input("Enter new quantity: "))
-                cursor.execute('UPDATE inventory SET quantity = ? WHERE bin_id = ?',
-                               (new_qty, bin_id))
-                connection.commit()
-                print("Inventory updated")
-
-            if table_name == 'api_keys':
-                service = input("Enter service to update: ")
-                new_key = input("Enter new API key: ")
-                cursor.execute('UPDATE api_keys SET api_key = ? WHERE service = ?',
-                               (new_key, service))
-                connection.commit()
-                print("API key updated")
-
-            # Log the update request
-            cursor.execute('INSERT INTO activity_logs VALUES (?, ?, datetime("now", "localtime"))',
-                           (username, f"Data updated in {table_name}"))
-            connection.commit()
-
-        # ensure the console displays the row to be deleted to the user and gets their confirmation for deletion
-        elif action == 'delete':
-            print("Specify information to delete")
-
-            if table_name == 'inventory':
-                bin_id = int(input("Enter bin_id to delete: "))
-                cursor.execute(f'SELECT * FROM {table_name} WHERE bin_id = ?', (bin_id,))
-                rows = cursor.fetchall()
-                for row in rows:
-                    print(row)
-                confirm_delete = input("Are you sure you want to delete this row? (y/n)")
-                if confirm_delete == 'y':
-                    cursor.execute('DELETE FROM inventory WHERE bin_id = ?', (bin_id,))
-                    connection.commit()
-                    print("Deleted row")
-                else:
-                    print("Exiting")
-
-            if table_name == 'api_keys':
-                print("API keys: ")
-                cursor.execute(f'SELECT * FROM {table_name}')
-                rows = cursor.fetchall()
-                for row in rows:
-                    print(row)
-
-                key = input("Enter API key to delete: ")
-                cursor.execute(f'SELECT * FROM {table_name} WHERE api_key = ?', (key,))
-                rows = cursor.fetchall()
-                for row in rows:
-                    print(row)
-                confirm_delete = input("Are you sure you want to delete this row? (y/n)")
-                if confirm_delete == 'y':
-                    cursor.execute('DELETE FROM {table_name} WHERE api_key = ?', (key,))
-                    connection.commit()
-                    print("Deleted row")
-                else:
-                    print("Exiting")
-
-            if table_name == 'users':
-                username = input("Enter username to delete: ")
-                cursor.execute(f'SELECT * FROM {table_name} WHERE username = ?', (username,))
-                rows = cursor.fetchall()
-                for row in rows:
-                    print(row)
-                confirm_delete = input("Are you sure you want to delete this row? (y/n)")
-                if (confirm_delete == 'y') and (username != "superuser"):
-                    cursor.execute('DELETE FROM users WHERE username = ?', (username,))
-                    connection.commit()
-                    print("Deleted row")
-                elif username == "superuser":
-                    print("Cannot delete superuser")
-                else:
-                    print("Exiting")
-
-            # Log the delete request
-            cursor.execute('INSERT INTO activity_logs VALUES (?, ?, datetime("now", "localtime"))',
-                           (username, f"Row deleted from {table_name}"))
-            connection.commit()
-
-# -----END OF CODE-----
-
-
 # close database connection
+connection.close()
+
+
+# Sync inventory from CSV log
+import csv
+from datetime import datetime
+
+CSV_PATH = "/home/am1/CAPSTONE/inventory_log.csv"
+
+connection = sqlite3.connect('testDB.db')
+cursor = connection.cursor()
+
+# Read CSV and find the most recent row per bin
+latest_by_bin = {}  # bin_id -> (timestamp_str, result_str)
+
+with open(CSV_PATH, newline='') as csvfile:
+    reader = csv.DictReader(csvfile)
+    for row in reader:
+        bin_id = int(row['bin'])
+        timestamp_str = row['timestamp']
+        result_str = row['result'].strip().upper()
+
+        if bin_id not in latest_by_bin:
+            latest_by_bin[bin_id] = (timestamp_str, result_str)
+        else:
+            existing_ts = datetime.strptime(latest_by_bin[bin_id][0], "%Y-%m-%d %H:%M:%S")
+            new_ts = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
+            if new_ts > existing_ts:
+                latest_by_bin[bin_id] = (timestamp_str, result_str)
+
+# For each bin with a recent CSV entry, update inventory if needed
+for bin_id, (csv_ts_str, csv_result_str) in latest_by_bin.items():
+    csv_quantity = 0 if csv_result_str == 'LO' else 1
+    csv_ts = datetime.strptime(csv_ts_str, "%Y-%m-%d %H:%M:%S")
+
+    row = cursor.execute(
+        'SELECT quantity, datetime FROM inventory WHERE bin_id = ?', (bin_id,)
+    ).fetchone()
+
+    if row is None:
+        cursor.execute(
+            'INSERT INTO inventory(bin_id, component, quantity, datetime) VALUES (?, ?, ?, ?)',
+            (bin_id, '', csv_quantity, csv_ts_str)
+        )
+        print(f"Inserted bin_id {bin_id}: quantity={csv_quantity}, datetime={csv_ts_str}")
+    else:
+        db_quantity, db_datetime_str = row
+        db_ts = datetime.strptime(db_datetime_str, "%Y-%m-%d %H:%M:%S") if db_datetime_str else None
+
+        if db_ts is None or (csv_ts > db_ts and csv_quantity != db_quantity):
+            cursor.execute(
+                'UPDATE inventory SET quantity = ?, datetime = ? WHERE bin_id = ?',
+                (csv_quantity, csv_ts_str, bin_id)
+            )
+            print(f"Updated bin_id {bin_id}: quantity={csv_quantity}, datetime={csv_ts_str}")
+
+connection.commit()
 connection.close()

@@ -149,7 +149,7 @@
                 formHtml += `
                     <div class="mb-3">
                         <label class="form-label">${col}</label>
-                        <input type="text" class="form-control" id="edit_${col}" value="${rowData[col] || ''}" required>
+                        <input type="text" class="form-control" id="edit_${col}" value="${rowData[col] != null ? rowData[col] : ''}" required>
                     </div>
                 `;
             });
