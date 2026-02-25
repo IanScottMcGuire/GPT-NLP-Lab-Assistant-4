@@ -83,7 +83,7 @@ const int POST_HIT_ESCAPE_STEPS    = 30;
 //                SINGLE "OFFSET KNOB" (DEGREES)
 // ============================================================
 
-const float INDEX_TO_STOP_DEG = 31.0f;
+const float INDEX_TO_STOP_DEG = 30.0f;
 const float TRIM_DEG          = -18.0f;
 
 // ============================================================
