@@ -194,6 +194,7 @@ def dispense_component(component_key: str) -> dict:
         return {"success": False, "message": "Could not open serial port.", "inventory": "UNKNOWN"}
 
     try:
+        '''
         # Step 1: Home — only runs once per UI session
         if not st.session_state.get("carousel_homed", False):
             for _ in range(20):
@@ -206,7 +207,7 @@ def dispense_component(component_key: str) -> dict:
             print("[HOME] Homing complete — will not home again this session.")
         else:
             print("[HOME] Already homed this session — skipping.")
-
+        '''
         # Step 2: Move to bin
         for _ in range(20):
             _send(ser, f"bin{bin_num}")
@@ -825,7 +826,7 @@ def main():
     st.session_state.setdefault("page", "Chatbot")
     st.session_state.setdefault("admin_logged_in", False)
     st.session_state.setdefault("carousel_homed", False)
-
+    '''
     if not st.session_state["carousel_homed"]:
         with st.spinner("Homing carousel on startup..."):
             ser = _open_serial()
@@ -843,7 +844,7 @@ def main():
                     ser.close()
             else:
                 st.warning("Could not open serial port for startup homing. Will retry on first dispense.")
-
+    '''
     embed_model = None
     try:
         # Force CPU to avoid competing with Whisper for Jetson shared GPU memory
