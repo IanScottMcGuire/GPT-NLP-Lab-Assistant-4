@@ -1,4 +1,4 @@
-# rag_ui.py
+#rag_ui_esp32.py
 import os
 import json
 import tempfile
@@ -95,12 +95,10 @@ def _open_serial() -> serial.Serial | None:
         print(f"[SERIAL] ERROR: {e}")
         return None
 
-
 def _send(ser: serial.Serial, cmd: str):
     ser.write((cmd + "\n").encode("utf-8"))
     ser.flush()
     print(f"[SERIAL] Sent: {cmd}")
-
 
 def _wait_for(ser: serial.Serial, target: str, timeout_s: float) -> tuple[bool, list[str]]:
     """Read lines from ESP32 until target string found or timeout. Returns (found, lines)."""
@@ -120,7 +118,6 @@ def _wait_for(ser: serial.Serial, target: str, timeout_s: float) -> tuple[bool, 
         time.sleep(0.01)
     return False, lines
 
-
 def _log_inventory(result: str, distance: str, bin_num: int):
     if not os.path.exists(LOG_FILE):
         with open(LOG_FILE, "w", newline="") as f:
@@ -129,7 +126,6 @@ def _log_inventory(result: str, distance: str, bin_num: int):
     with open(LOG_FILE, "a", newline="") as f:
         csv.writer(f).writerow([timestamp, result, distance or "N/A", bin_num])
     print(f"[LOG] {timestamp} | {result} | {distance} | bin{bin_num}")
-
 
 def _get_last_inventory(bin_num: int) -> str | None:
     if not os.path.exists(LOG_FILE):
@@ -143,7 +139,6 @@ def _get_last_inventory(bin_num: int) -> str | None:
             except (ValueError, KeyError):
                 continue
     return last
-
 
 def _inventory_background(ser: serial.Serial, gate_lines: list, bin_num: int):
     """
@@ -173,7 +168,6 @@ def _inventory_background(ser: serial.Serial, gate_lines: list, bin_num: int):
         print(f"[INV] bin{bin_num} → {inv_result} ({inv_distance} cm)")
     finally:
         ser.close()
-
 
 def dispense_component(component_key: str) -> dict:
     """
@@ -228,7 +222,6 @@ def dispense_component(component_key: str) -> dict:
             return {"success": False, "message": "Timed out waiting for bin to be reinserted.", "inventory": "UNKNOWN"}
 
         # User has their component — hand off to background thread for inventory sensing.
-        # Do NOT close ser here — the background thread owns it and will close it.
         import threading
         t = threading.Thread(
             target=_inventory_background,
@@ -262,7 +255,6 @@ def load_whisper_model():
         st.error(f"Failed to load Whisper: {e}")
         return None
 
-
 def transcribe_with_whisper(duration=5):
     model = load_whisper_model()
     if model is None:
@@ -276,7 +268,6 @@ def transcribe_with_whisper(duration=5):
     import torch
     result = model.transcribe(audio_np, fp16=torch.cuda.is_available(), language="en")
     return result["text"].strip()
-
 
 def speak_text(text):
     if TTS_ENGINE == "gtts":
@@ -324,11 +315,9 @@ def load_faqs():
         json.dump(default, f, indent=2)
     return default
 
-
 def save_faqs(faqs):
     with open(FAQS_PATH, "w", encoding="utf-8") as f:
         json.dump(faqs, f, indent=2)
-
 
 def load_index():
     if not os.path.exists(INDEX_PATH):
@@ -338,7 +327,6 @@ def load_index():
         index, texts = pickle.load(f)
     return index, texts
 
-
 def retrieve_context(query, index, texts, embed_model, k=3):
     if index is None or texts is None:
         return ""
@@ -346,12 +334,7 @@ def retrieve_context(query, index, texts, embed_model, k=3):
     _, indices = index.search(qvec, k)
     return "\n\n".join(texts[i] for i in indices[0] if 0 <= i < len(texts))
 
-
 def query_tamuai(messages: list) -> str:
-    """
-    Send a full message history to the LLM.
-    messages = [{"role": "user"|"assistant"|"system", "content": "..."}]
-    """
     if not API_KEY or not API_URL:
         raise RuntimeError("API_KEY or API_URL not set.")
     headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
@@ -364,7 +347,6 @@ def query_tamuai(messages: list) -> str:
     r.raise_for_status()
     return r.json()["choices"][0]["message"]["content"]
 
-
 def match_faq_local(user_input, embed_model, faqs, threshold=0.78):
     best_match, best_score = None, 0.0
     user_vec = embed_model.encode(user_input)
@@ -375,7 +357,6 @@ def match_faq_local(user_input, embed_model, faqs, threshold=0.78):
                 best_score = score
                 best_match = qa
     return best_match["answer"] if best_score >= threshold else None
-
 
 def extract_component_request(text: str) -> str | None:
     t = text.lower().replace(" ", "")
@@ -407,15 +388,13 @@ detector.set_input_block_message("Input blocked: {matched_keywords}")
 detector.set_output_block_message("Output blocked: {matched_keywords}")
 
 
-
 # ═══════════════════════════════════════════════════════════
 #                   CAMERA VISION
 # ═══════════════════════════════════════════════════════════
 
 # Path to the camera vision script (same folder as this file)
-VISION_SCRIPT      = "/home/am1/GPT-NLP-Lab-Assistant-4/Raquel's Folder/403model/camera_local.py"
-VISION_RESULT_FILE = "/home/am1/GPT-NLP-Lab-Assistant-4/Raquel's Folder/403model/prediction_result.txt"
-
+VISION_SCRIPT      = "/home/am1/camera_local.py"
+VISION_RESULT_FILE = "/home/am1/prediction_results.txt"
 
 def scan_component() -> dict:
     """
@@ -425,8 +404,6 @@ def scan_component() -> dict:
     The vision script handles everything: camera warm-up, inference against
     the local Roboflow Docker server, averaging, and writing the final
     component name to prediction_result.txt as "class,confidence".
-
-    Returns { "success": bool, "component": str, "message": str }
     """
     # Remove stale result file so we don't accidentally read a previous run
     if os.path.exists(VISION_RESULT_FILE):
@@ -436,7 +413,7 @@ def scan_component() -> dict:
         # Run the vision script synchronously — blocks until it completes
         result = subprocess.run(
             [sys.executable, VISION_SCRIPT],
-            timeout=60,
+            timeout=20,
             capture_output=True,
             text=True,
         )
@@ -447,7 +424,7 @@ def scan_component() -> dict:
                     "message": f"Camera vision script failed (exit {result.returncode})."}
     except subprocess.TimeoutExpired:
         return {"success": False, "component": "",
-                "message": "Camera vision timed out after 60 seconds."}
+                "message": "Camera vision timed out after 20 seconds."}
     except Exception as e:
         return {"success": False, "component": "", "message": f"Camera vision error: {e}"}
 
@@ -459,15 +436,20 @@ def scan_component() -> dict:
     try:
         with open(VISION_RESULT_FILE, "r") as f:
             line = f.read().strip()
-        # Format is "class,confidence" e.g. "1k-resistor,0.8732"
-        component = line.split(",")[0].strip()
-        if not component or component == "none":
+            
+        # The camera script writes: "10kohm 85.00%" or "No detections"
+        # We split by space and take the first word.
+        component = line.split(" ")[0].strip()
+        
+        # If it says "No detections", the first word is "No"
+        if not component or component.lower() == "no" or component.lower() == "No":
             return {"success": False, "component": "",
                     "message": "No component detected. Try repositioning and scanning again."}
         return {"success": True, "component": component,
                 "message": f"Detected: {component}"}
     except Exception as e:
         return {"success": False, "component": "", "message": f"Could not read result: {e}"}
+
 
 # ═══════════════════════════════════════════════════════════
 #                       ADMIN PAGES
@@ -490,7 +472,6 @@ def admin_login_page():
         if st.button("Cancel"):
             st.session_state["page"] = "Chatbot"
             st.rerun()
-
 
 def admin_dashboard_page(faqs):
     if not st.session_state.get("admin_logged_in", False):
@@ -610,29 +591,20 @@ SYSTEM_PROMPT = (
     "commonly used in electronics lab work."
 )
 
-
 def _render_chat_history():
     """Render the chat history bubbles."""
     for msg in st.session_state.get("chat_history", []):
         if msg["role"] == "system":
             continue
         with st.chat_message(msg["role"]):
-            # If the message has an image attached, show it
-            if msg.get("image") is not None:
-                st.image(msg["image"], caption="Camera scan", width=320)
             st.write(msg["content"])
 
-
-def _add_to_history(role: str, content: str, image=None):
+def _add_to_history(role: str, content: str):
     """Append a message to chat history."""
-    entry = {"role": role, "content": content}
-    if image is not None:
-        entry["image"] = image
-    st.session_state["chat_history"].append(entry)
-
+    st.session_state["chat_history"].append({"role": role, "content": content})
 
 def _llm_messages() -> list:
-    """Build the messages list for the API — system prompt + history, no image entries."""
+    """Build the messages list for the API — system prompt + history."""
     msgs = [{"role": "system", "content": SYSTEM_PROMPT}]
     for msg in st.session_state.get("chat_history", []):
         if msg["role"] == "system":
@@ -640,15 +612,12 @@ def _llm_messages() -> list:
         msgs.append({"role": msg["role"], "content": msg["content"]})
     return msgs
 
-
 def chatbot_page(index, texts, embed_model, faqs):
     st.title("ECEN Chatbot")
 
-    # ── Session state defaults ────────────────────────────────
     st.session_state.setdefault("chat_history", [])
     st.session_state.setdefault("stt_result", "")
 
-    # ── Sidebar: FAQs + Clear History ────────────────────────
     with st.sidebar:
         if st.button("🗑 Clear Chat History", use_container_width=True):
             st.session_state["chat_history"] = []
@@ -666,7 +635,6 @@ def chatbot_page(index, texts, embed_model, faqs):
                         st.session_state["prefilled_question"] = qa["question"]
                         st.session_state["prefilled_answer"]   = qa["answer"]
 
-    # ── Dispense result banner (shown above chat) ─────────────
     if "dispense_result" in st.session_state:
         msg = st.session_state.pop("dispense_result")
         if msg.startswith("✅"):
@@ -674,7 +642,6 @@ def chatbot_page(index, texts, embed_model, faqs):
         else:
             st.error(msg)
 
-    # ── Confirm dispense dialog (separate from chat) ──────────
     if "pending_dispense" in st.session_state:
         comp_key  = st.session_state["pending_dispense"]
         comp_name = COMPONENT_DISPLAY.get(comp_key, comp_key)
@@ -700,10 +667,8 @@ def chatbot_page(index, texts, embed_model, faqs):
                 st.rerun()
         return
 
-    # ── Render chat history ───────────────────────────────────
     _render_chat_history()
 
-    # ── Input row: text + speak + scan ───────────────────────
     col_input, col_speak, col_scan = st.columns([5, 1, 1])
 
     with col_speak:
@@ -725,7 +690,6 @@ def chatbot_page(index, texts, embed_model, faqs):
                 scan = scan_component()
             if scan["success"]:
                 component = scan["component"]
-                # Pass the component string directly to the LLM — no confidence or frame needed
                 user_msg = (
                     f"The camera identified this component: {component}. "
                     f"Please provide its full name, typical specifications, "
@@ -749,7 +713,6 @@ def chatbot_page(index, texts, embed_model, faqs):
         current_input = st.session_state.get("stt_result") or st.session_state.get("prefilled_question", "")
         user_input = st.text_input("Ask a question or request a component:", value=current_input, key="main_input")
 
-    # ── Manual component dropdown ─────────────────────────────
     with st.expander("Or select a component manually"):
         component_options = {"Select...": None} | {v: k for k, v in COMPONENT_DISPLAY.items()}
         selected_display = st.selectbox("Component", list(component_options.keys()))
@@ -764,7 +727,6 @@ def chatbot_page(index, texts, embed_model, faqs):
                 st.session_state["pending_dispense"] = component_key
                 st.rerun()
 
-    # ── Process text / voice input ────────────────────────────
     if not user_input:
         return
 
@@ -772,7 +734,6 @@ def chatbot_page(index, texts, embed_model, faqs):
     st.session_state.pop("prefilled_question", None)
     st.session_state.pop("prefilled_answer", None)
 
-    # 1. Component dispense request
     component_key = extract_component_request(user_input)
     if component_key:
         comp_name = COMPONENT_DISPLAY.get(component_key, component_key)
@@ -785,7 +746,6 @@ def chatbot_page(index, texts, embed_model, faqs):
         st.rerun()
         return
 
-    # 2. Safety check
     is_injection, _ = detector.detect_injection(user_input)
     blocked, _      = detector.check_input_keywords(user_input)
     if is_injection or blocked:
@@ -794,12 +754,10 @@ def chatbot_page(index, texts, embed_model, faqs):
             f.write(f"[{datetime.now()}] {user_input}\n")
         return
 
-    # 3. Local FAQ match — answered inline, also added to chat history
     local_answer = match_faq_local(user_input, embed_model, faqs)
     if local_answer:
         _add_to_history("user", user_input)
         _add_to_history("assistant", local_answer)
-        # Rerender history with new messages — no st.rerun() to avoid loop
         with st.chat_message("user"):
             st.write(user_input)
         with st.chat_message("assistant"):
@@ -808,10 +766,8 @@ def chatbot_page(index, texts, embed_model, faqs):
             speak_text(local_answer)
         return
 
-    # 4. RAG + LLM with full chat history
     _add_to_history("user", user_input)
     context = retrieve_context(user_input, index, texts, embed_model)
-    # Inject RAG context as a system note — not visible in chat history
     messages = _llm_messages()
     if context:
         messages.insert(1, {
@@ -822,7 +778,7 @@ def chatbot_page(index, texts, embed_model, faqs):
         with st.spinner("Thinking..."):
             answer = query_tamuai(messages)
     except Exception as e:
-        st.session_state["chat_history"].pop()  # remove the user msg we just added
+        st.session_state["chat_history"].pop() 
         st.error(f"LLM request failed: {e}")
         return
 
@@ -835,7 +791,6 @@ def chatbot_page(index, texts, embed_model, faqs):
         return
 
     _add_to_history("assistant", answer)
-    # Render the new exchange directly — no st.rerun() to avoid loop
     with st.chat_message("user"):
         st.write(user_input)
     with st.chat_message("assistant"):
@@ -871,7 +826,6 @@ def main():
     st.session_state.setdefault("admin_logged_in", False)
     st.session_state.setdefault("carousel_homed", False)
 
-    # Home the carousel once at startup if not already done
     if not st.session_state["carousel_homed"]:
         with st.spinner("Homing carousel on startup..."):
             ser = _open_serial()
@@ -921,3 +875,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
