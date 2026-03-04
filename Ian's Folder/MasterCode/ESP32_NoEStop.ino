@@ -79,7 +79,7 @@ const int  POST_HIT_ESCAPE_STEPS   = 30;
 //                SINGLE "OFFSET KNOB" (DEGREES)
 // ============================================================
 
-const float INDEX_TO_STOP_DEG = 30.0f;
+const float INDEX_TO_STOP_DEG = 29.0f;
 const float TRIM_DEG          = -18.0f;
 
 // ============================================================
@@ -741,8 +741,9 @@ void loop() {
     return;
   }
 
-  // ---- unknown ----
-  hostPrintln(F("Unknown command. Use: bin0..bin3, i, quit"));
-  line = "";
-  printEnterCommand();
+    // ---- unknown ----
+  hostPrint(F("Unknown command: '"));
+  hostPrint(line);
+  hostPrintln(F("'. Use: bin0..bin3, i, quit"));
+  line = ""; printEnterCommand();
 }

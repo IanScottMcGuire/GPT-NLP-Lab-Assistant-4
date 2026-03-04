@@ -75,7 +75,7 @@ const int  POST_HIT_ESCAPE_STEPS   = 30;
 //                  OFFSET / HOMING
 // ============================================================
 
-const float INDEX_TO_STOP_DEG  = 30.0f;
+const float INDEX_TO_STOP_DEG  = 29.0f;
 const float TRIM_DEG           = -18.0f;
 const float ENCODER_GAP_RATIO  = 0.60f;
 const int   HOME_SAMPLE_EVENTS = 10;
@@ -730,6 +730,8 @@ void loop() {
   }
 
   // ---- unknown ----
-  hostPrintln(F("Unknown command. Use: bin0..bin3, i, quit, e"));
+  hostPrint(F("Unknown command: '"));
+  hostPrint(line);
+  hostPrintln(F("'. Use: bin0..bin3, i, quit, e"));
   line = ""; printEnterCommand();
 }
