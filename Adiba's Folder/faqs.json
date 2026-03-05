@@ -1,0 +1,18 @@
+{
+  "ECEN 214": [
+    {
+      "question": "How do I measure the output of an op-amp circuit in the lab?",
+      "answer": "Connect the oscilloscope probe across the output terminal and ground. Make sure to use the correct probe attenuation (typically 10x) and verify the circuit has proper DC biasing."
+    },
+    {
+      "question": "What is the purpose of a feedback resistor in an amplifier?",
+      "answer": "The feedback resistor controls the gain and stability of the amplifier. It determines the closed-loop gain when used with an input resistor in op-amp configurations."
+    }
+  ],
+  "Equipment Troubleshooting": [
+    {
+      "question": "The oscilloscope is not displaying a waveform \u2014 what should I check?",
+      "answer": "Confirm probe connection, vertical scale, time base settings, and that the trigger level is set correctly. Check your probe connection directly using the waveform generator as well as the digital signal probe."
+    }
+  ]
+}

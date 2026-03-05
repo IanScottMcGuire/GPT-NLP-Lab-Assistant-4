@@ -1,0 +1,50 @@
+{
+    "ECEN 214": [
+        {
+            "question": "How do I measure the output of an op-amp circuit in the lab?",
+            "answer": "Connect the oscilloscope probe across the output terminal and ground. Make sure to use the correct probe attenuation (typically 10x) and verify the circuit has proper DC biasing."
+        },
+        {
+            "question": "What is the purpose of a feedback resistor in an amplifier?",
+            "answer": "The feedback resistor controls the gain and stability of the amplifier. It determines the closed-loop gain when used with an input resistor in op-amp configurations."
+        },
+        {
+            "question": "How do I correctly use the Analog Discovery 2 to measure voltage and current?",
+            "answer": "Connect the Wavegen or Scope channels to the circuit following the Digilent reference guide. Always ensure the reference ground is shared with the circuit."
+        }
+    ],
+    "ECEN 248": [
+        {
+            "question": "How do I debug Verilog code that doesn't simulate correctly?",
+            "answer": "Start by checking signal assignments, ensure blocking (`=`) vs non-blocking (`<=`) usage is correct, and verify your testbench applies correct inputs over time."
+        },
+        {
+            "question": "What is the difference between blocking and non-blocking assignments in Verilog?",
+            "answer": "Blocking assignments execute sequentially (`=`), while non-blocking (`<=`) execute concurrently. Always use non-blocking in clocked always blocks."
+        },
+        {
+            "question": "How do I program the FPGA board used in ECEN 248 labs?",
+            "answer": "After simulation, generate the bitstream in Vivado and use the Hardware Manager to connect to the FPGA board via USB-JTAG and program it."
+        }
+    ],
+    "Equipment Troubleshooting": [
+        {
+            "question": "Why is the power supply not outputting voltage?",
+            "answer": "1. First ensure that the voltage supply button is lit up (turned on). 2. Check your probes by connecting the tips of the ground and power to the tips of the multimeter to ensure the probes are working. You can also connect via breadboard."
+        },
+        {
+            "question": "The oscilloscope is not displaying a waveform — what should I check?",
+            "answer": "Confirm probe connection, vertical scale, time base settings, and that the trigger level is set correctly. Check your probe connection directly using the waveform generator as well as the digital signal probe."
+        }
+    ],
+    "Lab Space Questions": [
+        {
+            "question": "How do I make a reservation when I miss a lab/could not finish a lab?",
+            "answer": "Go to the front desk and scan the QR code for access to make a reservation. Then, you can either make a reservation at one of the front desk kiosks, or scan the QR code to complete the reservation at your own time on your device."
+        },
+        {
+            "question": "Who can I contact about the 3rd floor lab space?",
+            "answer": "You can contact the Coordinator and request their information from the front desk of the lab space."
+        }
+    ]
+}
