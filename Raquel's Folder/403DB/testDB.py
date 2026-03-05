@@ -26,7 +26,7 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS users(
 cursor.execute('''CREATE TABLE IF NOT EXISTS inventory(
                bin_id INTEGER UNIQUE NOT NULL, 
                component TEXT NOT NULL, 
-               quantity INTEGER NOT NULL,
+               quantity TEXT NOT NULL,
                datetime TEXT)''') # 0 = low, 1 = high
 
 # create api key table, only admin_perm should have access

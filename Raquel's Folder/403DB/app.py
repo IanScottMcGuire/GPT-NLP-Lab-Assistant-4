@@ -6,7 +6,7 @@ import signal
 from datetime import timedelta, datetime
 from functools import wraps
 
-CSV_PATH = "/home/am1/CAPSTONE/inventory_log.csv"
+CSV_PATH = "/home/raquel/Documents/GPT-NLP-Lab-Assistant-4/Adiba's Folder/inventory_log.csv"
 
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-change-in-production'
@@ -45,7 +45,6 @@ def sync_inventory_from_csv():
     conn = get_db_connection()
     try:
         for bin_id, (csv_ts_str, csv_result_str) in latest_by_bin.items():
-            csv_quantity = 0 if csv_result_str == 'LO' else 1
             csv_ts = datetime.strptime(csv_ts_str, "%Y-%m-%d %H:%M:%S")
 
             row = conn.execute(
@@ -55,15 +54,15 @@ def sync_inventory_from_csv():
             if row is None:
                 conn.execute(
                     'INSERT INTO inventory(bin_id, component, quantity, datetime) VALUES (?, ?, ?, ?)',
-                    (bin_id, '', csv_quantity, csv_ts_str)
+                    (bin_id, '', csv_result_str, csv_ts_str)
                 )
             else:
                 db_datetime_str = row['datetime']
                 db_ts = datetime.strptime(db_datetime_str, "%Y-%m-%d %H:%M:%S") if db_datetime_str else None
-                if db_ts is None or (csv_ts > db_ts and csv_quantity != row['quantity']):
+                if db_ts is None or (csv_ts > db_ts and csv_result_str != row['quantity']):
                     conn.execute(
                         'UPDATE inventory SET quantity = ?, datetime = ? WHERE bin_id = ?',
-                        (csv_quantity, csv_ts_str, bin_id)
+                        (csv_result_str, csv_ts_str, bin_id)
                     )
         conn.commit()
     finally:
@@ -211,12 +210,16 @@ def view_table(table_name):
         data.append(row_dict)
 
     can_edit = session.get('is_admin') == 1 and table_name not in ['users', 'activity_logs']
+    can_refill = table_name == 'inventory' and (session.get('refill_perm') == 1 or session.get('is_admin') == 1)
+    refill_mode = can_refill and request.args.get('refill_mode') == '1'
 
     return render_template('view_table.html',
                            table_name=table_name,
                            columns=columns,
                            data=data,
-                           can_edit=can_edit)
+                           can_edit=can_edit,
+                           can_refill=can_refill,
+                           refill_mode=refill_mode)
 
 
 @app.route('/edit_user_permissions/<username>', methods=['GET', 'POST'])
@@ -265,6 +268,9 @@ def insert_row(table_name):
     try:
         row_id = None
         if table_name == 'inventory':
+            if data['quantity'] not in ('LO', 'HI'):
+                conn.close()
+                return jsonify({'success': False, 'error': 'quantity must be "LO" or "HI"'}), 400
             conn.execute('INSERT INTO inventory (bin_id, component, quantity) VALUES (?, ?, ?)',
                          (data['bin_id'], data['component'], data['quantity']))
             row_id = data['bin_id']
@@ -302,6 +308,9 @@ def update_row(table_name):
     try:
         row_id = None
         if table_name == 'inventory':
+            if data['quantity'] not in ('LO', 'HI'):
+                conn.close()
+                return jsonify({'success': False, 'error': 'quantity must be "LO" or "HI"'}), 400
             conn.execute('UPDATE inventory SET component = ?, quantity = ? WHERE bin_id = ?',
                          (data['component'], data['quantity'], data['bin_id']))
             row_id = data['bin_id']
@@ -347,6 +356,71 @@ def delete_row(table_name):
         return jsonify({'success': True})
     except Exception as e:
         conn.close()
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/refill/inventory', methods=['POST'])
+@login_required
+def refill_inventory():
+    if session.get('refill_perm') != 1 and session.get('is_admin') != 1:
+        return jsonify({'success': False, 'error': 'Permission denied'}), 403
+
+    data = request.json
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            'UPDATE inventory SET quantity = ?, datetime = ? WHERE bin_id = ?',
+            ('HI', datetime.now().strftime('%Y-%m-%d %H:%M:%S'), data['bin_id'])
+        )
+        conn.commit()
+        conn.close()
+        log_activity(session['username'], f"Refilled bin {data['bin_id']} in inventory")
+        return jsonify({'success': True})
+    except Exception as e:
+        conn.close()
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/refill/commit_all', methods=['POST'])
+@login_required
+def refill_commit_all():
+    if session.get('refill_perm') != 1 and session.get('is_admin') != 1:
+        return jsonify({'success': False, 'error': 'Permission denied'}), 403
+
+    rows = request.json.get('rows', [])
+    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    try:
+        # Step 1 & 2: Overwrite CSV keeping only the header, then append updated rows
+        with open(CSV_PATH, 'w', newline='') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=['timestamp', 'result', 'distance_cm', 'bin'])
+            writer.writeheader()
+            for row in rows:
+                writer.writerow({
+                    'timestamp': row.get('datetime') or now_str,
+                    'result': row.get('quantity', ''),
+                    'distance_cm': 0,
+                    'bin': row.get('bin_id', '')
+                })
+
+        # Step 3: Pull CSV updates into the inventory table
+        sync_inventory_from_csv()
+
+        # Also persist component edits (not tracked in CSV)
+        conn = get_db_connection()
+        try:
+            for row in rows:
+                conn.execute(
+                    'UPDATE inventory SET component = ? WHERE bin_id = ?',
+                    (row.get('component', ''), row.get('bin_id'))
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+        log_activity(session['username'], "Committed refill changes to inventory")
+        return jsonify({'success': True})
+    except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 400
 
 

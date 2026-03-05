@@ -16,10 +16,18 @@
 
     <div class="container mt-4">
         <div class="d-flex justify-content-between align-items-center mb-4">
-            <h2 class="text-capitalize">{{ table_name.replace('_', ' ') }}</h2>
-            {% if can_edit %}
-            <button class="btn btn-success" onclick="showInsertModal()">Add New Row</button>
-            {% endif %}
+            <h2 class="text-capitalize">
+                {{ table_name.replace('_', ' ') }}
+                {% if refill_mode %}<span class="badge bg-warning text-dark ms-2" style="font-size:0.6em;vertical-align:middle;">Refill Mode</span>{% endif %}
+            </h2>
+            <div class="d-flex gap-2">
+                {% if can_edit and not refill_mode %}
+                <button class="btn btn-success" onclick="showInsertModal()">Add New Row</button>
+                {% endif %}
+                {% if can_refill and not refill_mode %}
+                <a href="{{ url_for('view_table', table_name=table_name, refill_mode=1) }}" class="btn btn-primary">Refill Mode</a>
+                {% endif %}
+            </div>
         </div>
 
         {% if data %}
@@ -30,10 +38,12 @@
                         {% for column in columns %}
                         <th>{{ column }}</th>
                         {% endfor %}
-                        {% if can_edit %}
-                        <th>Actions</th>
-                        {% elif table_name == 'users' and session.is_admin %}
-                        <th>Actions</th>
+                        {% if not refill_mode %}
+                            {% if can_edit or can_refill %}
+                            <th>Actions</th>
+                            {% elif table_name == 'users' and session.is_admin %}
+                            <th>Actions</th>
+                            {% endif %}
                         {% endif %}
                     </tr>
                 </thead>
@@ -41,27 +51,46 @@
                     {% for row in data %}
                     <tr>
                         {% for column in columns %}
+                        {% if refill_mode %}
+                        <td><input type="text" class="form-control form-control-sm refill-input" data-col="{{ column }}" value="{{ row[column] if row[column] is not none else '' }}"></td>
+                        {% else %}
                         <td>{{ row[column] }}</td>
+                        {% endif %}
                         {% endfor %}
-                        {% if can_edit %}
-                        <td>
-                            <button class="btn btn-sm btn-primary" onclick='editRow({{ row | tojson }})'>Edit</button>
-                            <button class="btn btn-sm btn-danger" onclick='deleteRow({{ row | tojson }})'>Delete</button>
-                        </td>
-                        {% elif table_name == 'users' and session.is_admin and row.username != 'superuser' %}
-                        <td>
-                            <a href="{{ url_for('edit_user_permissions', username=row.username) }}" class="btn btn-sm btn-warning">Edit Permissions</a>
-                        </td>
-                        {% elif table_name == 'users' and row.username == 'superuser' %}
-                        <td>
-                            <span class="text-muted">Protected</span>
-                        </td>
+                        {% if not refill_mode %}
+                            {% if can_edit or can_refill %}
+                            <td>
+                                {% if can_edit %}
+                                <button class="btn btn-sm btn-primary" onclick='editRow({{ row | tojson }})'>Edit</button>
+                                <button class="btn btn-sm btn-danger" onclick='deleteRow({{ row | tojson }})'>Delete</button>
+                                {% endif %}
+                                {% if can_refill %}
+                                <button class="btn btn-sm btn-warning" onclick='refillRow({{ row["bin_id"] }})'>Refill</button>
+                                {% endif %}
+                            </td>
+                            {% elif table_name == 'users' and session.is_admin and row.username != 'superuser' %}
+                            <td>
+                                <a href="{{ url_for('edit_user_permissions', username=row.username) }}" class="btn btn-sm btn-warning">Edit Permissions</a>
+                            </td>
+                            {% elif table_name == 'users' and row.username == 'superuser' %}
+                            <td>
+                                <span class="text-muted">Protected</span>
+                            </td>
+                            {% endif %}
                         {% endif %}
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
+
+        {% if refill_mode %}
+        <div class="d-flex gap-2 mt-3 mb-4">
+            <button class="btn btn-success" onclick="commitRefillChanges()">Commit Changes</button>
+            <a href="{{ url_for('view_table', table_name=table_name) }}" class="btn btn-secondary">Cancel</a>
+        </div>
+        {% endif %}
+
         {% else %}
         <div class="alert alert-info">No data in this table yet.</div>
         {% endif %}
@@ -190,6 +219,47 @@
             .then(result => {
                 if (result.success) {
                     location.reload();
+                } else {
+                    alert('Error: ' + result.error);
+                }
+            });
+        }
+
+        function refillRow(binId) {
+            fetch('/api/refill/inventory', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({bin_id: binId})
+            })
+            .then(r => r.json())
+            .then(result => {
+                if (result.success) {
+                    location.reload();
+                } else {
+                    alert('Error: ' + result.error);
+                }
+            });
+        }
+
+        function commitRefillChanges() {
+            const rows = [];
+            document.querySelectorAll('#dataTable tbody tr').forEach(tr => {
+                const row = {};
+                tr.querySelectorAll('.refill-input').forEach(input => {
+                    row[input.dataset.col] = input.value;
+                });
+                rows.push(row);
+            });
+
+            fetch('/api/refill/commit_all', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({rows: rows})
+            })
+            .then(r => r.json())
+            .then(result => {
+                if (result.success) {
+                    window.location.href = '{{ url_for("view_table", table_name="inventory") }}';
                 } else {
                     alert('Error: ' + result.error);
                 }
