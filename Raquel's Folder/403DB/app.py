@@ -397,22 +397,19 @@ def refill_commit_all():
             writer.writeheader()
             for row in rows:
                 writer.writerow({
-                    'timestamp': row.get('datetime') or now_str,
+                    'timestamp': now_str,
                     'result': row.get('quantity', ''),
                     'distance_cm': 0,
                     'bin': row.get('bin_id', '')
                 })
 
-        # Step 3: Pull CSV updates into the inventory table
-        sync_inventory_from_csv()
-
-        # Also persist component edits (not tracked in CSV)
+        # Step 3: Update inventory table directly with now_str for all rows
         conn = get_db_connection()
         try:
             for row in rows:
                 conn.execute(
-                    'UPDATE inventory SET component = ? WHERE bin_id = ?',
-                    (row.get('component', ''), row.get('bin_id'))
+                    'UPDATE inventory SET component = ?, quantity = ?, datetime = ? WHERE bin_id = ?',
+                    (row.get('component', ''), row.get('quantity', ''), now_str, row.get('bin_id'))
                 )
             conn.commit()
         finally:
