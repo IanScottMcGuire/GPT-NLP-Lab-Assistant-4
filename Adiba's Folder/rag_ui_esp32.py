@@ -201,6 +201,7 @@ def dispense_component(component_key: str) -> dict:
 
     try:
         # Step 1: Home — only runs once per UI session
+ #       """
         if not st.session_state.get("carousel_homed", False):
             for _ in range(20):
                 _send(ser, "h")
@@ -212,7 +213,7 @@ def dispense_component(component_key: str) -> dict:
             print("[HOME] Homing complete — will not home again this session.")
         else:
             print("[HOME] Already homed this session — skipping.")
-
+ #	"""
         # Step 2: Move to bin
         for _ in range(20):
             _send(ser, f"bin{bin_num}")
@@ -413,8 +414,8 @@ detector.set_output_block_message("Output blocked: {matched_keywords}")
 # ═══════════════════════════════════════════════════════════
 
 # Path to the camera vision script (same folder as this file)
-VISION_SCRIPT      = "/home/am1/Raquel/403model.py"
-VISION_RESULT_FILE = "/home/am1/Raquel/prediction_result.txt"
+VISION_SCRIPT      = "/home/am1/GPT-NLP-Lab-Assistant-4/Raquel's Folder/403model/camera_local.py"
+VISION_RESULT_FILE = "/home/am1/GPT-NLP-Lab-Assistant-4/Raquel's Folder/403model/prediction_result.txt"
 
 
 def scan_component() -> dict:
@@ -878,6 +879,7 @@ def main():
     st.session_state.setdefault("carousel_homed", False)
 
     # Home the carousel once at startup if not already done
+  #  """
     if not st.session_state["carousel_homed"]:
         with st.spinner("Homing carousel on startup..."):
             ser = _open_serial()
@@ -895,7 +897,7 @@ def main():
                     ser.close()
             else:
                 st.warning("Could not open serial port for startup homing. Will retry on first dispense.")
-
+    # """
     embed_model = None
     try:
         # Force CPU to avoid competing with Whisper for Jetson shared GPU memory
