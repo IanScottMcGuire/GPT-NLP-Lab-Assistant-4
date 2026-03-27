@@ -236,15 +236,10 @@ def dispense_component(component_key: str) -> dict:
         return {"success": False, "message": "Could not open serial port.", "inventory": "UNKNOWN"}
 
     try:
-<<<<<<< HEAD
-        # Step 1: Home — only runs once per UI session
- #       """
-=======
         # ── Step 1: Home ───────────────────────────────────────────
         # 'h' is only accepted at startup by the firmware; sending it after
         # startup will be silently ignored. We guard with session state so
         # we only attempt homing once per Streamlit session.
->>>>>>> 2feb6a51171173b446763369b675af330cf6da98
         if not st.session_state.get("carousel_homed", False):
             _send(ser, "h")  # send once — firmware processes one command per newline
             ok, _ = _wait_for(ser, "Homing complete", HOME_TIMEOUT_S)
@@ -255,16 +250,6 @@ def dispense_component(component_key: str) -> dict:
             print("[HOME] Homing complete — will not home again this session.")
         else:
             print("[HOME] Already homed this session — skipping.")
-<<<<<<< HEAD
- #	"""
-        # Step 2: Move to bin
-        for _ in range(20):
-            _send(ser, f"bin{bin_num}")
-        ok, _ = _wait_for(ser, f"Done. Now at BIN{bin_num}", MOVE_TIMEOUT_S)
-        if not ok:
-            ser.close()
-            return {"success": False, "message": f"Failed to move to bin {bin_num}.", "inventory": "UNKNOWN"}
-=======
 
         # ── Step 2: Move to bin ────────────────────────────────────
         # Firmware rejects bin moves when GATE_LOCKOUT or INVENTORY_REQUIRED.
@@ -276,7 +261,6 @@ def dispense_component(component_key: str) -> dict:
             targets=[f"Now at BIN{bin_num}", "GATE LOCKOUT", "INVENTORY REQUIRED"],
             timeout_s=MOVE_TIMEOUT_S,
         )
->>>>>>> 2feb6a51171173b446763369b675af330cf6da98
 
         if matched is None:
             ser.close()
@@ -478,14 +462,8 @@ detector.set_output_block_message("Output blocked: {matched_keywords}")
 #                   CAMERA VISION
 # ═══════════════════════════════════════════════════════════
 
-<<<<<<< HEAD
-# Path to the camera vision script (same folder as this file)
-VISION_SCRIPT      = "/home/am1/GPT-NLP-Lab-Assistant-4/Raquel's Folder/403model/camera_local.py"
-VISION_RESULT_FILE = "/home/am1/GPT-NLP-Lab-Assistant-4/Raquel's Folder/403model/prediction_result.txt"
-=======
 VISION_SCRIPT      = "/home/am1/Raquel/403model.py"
 VISION_RESULT_FILE = "/home/am1/Raquel/prediction_result.txt"
->>>>>>> 2feb6a51171173b446763369b675af330cf6da98
 
 
 def scan_component() -> dict:
@@ -935,8 +913,6 @@ def main():
     st.session_state.setdefault("admin_logged_in", False)
     st.session_state.setdefault("carousel_homed", False)
 
-    # Home the carousel once at startup if not already done
-  #  """
     # Home the carousel once at startup if not already done.
     # NOTE: 'h' is only accepted by the firmware before any other commands,
     # so we must send it before the user makes any dispense requests.
@@ -956,7 +932,7 @@ def main():
                     ser.close()
             else:
                 st.warning("Could not open serial port for startup homing. Will retry on first dispense.")
-    # """
+
     embed_model = None
     try:
         embed_model = SentenceTransformer(MODEL_NAME, device="cpu")
