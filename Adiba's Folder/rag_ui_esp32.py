@@ -237,17 +237,28 @@ def dispense_component(component_key: str) -> dict:
 
     try:
         # ── Step 1: Home ───────────────────────────────────────────
-        # 'h' is only accepted at startup by the firmware; sending it after
-        # startup will be silently ignored. We guard with session state so
-        # we only attempt homing once per Streamlit session.
         if not st.session_state.get("carousel_homed", False):
-            _send(ser, "h")  # send once — firmware processes one command per newline
-            ok, _ = _wait_for(ser, "Homing complete", HOME_TIMEOUT_S)
-            if not ok:
+            
+            # 1. Give the ESP32 a brief moment in case opening the port triggered a reset
+            time.sleep(1.5) 
+            
+            # 2. Send the home command
+            _send(ser, "h") 
+            
+            # 3. Look for EITHER a successful home OR the ESP32 rejecting it because it's already running
+            matched, _ = _wait_for_any(ser, ["Homing complete", "IGNORED"], HOME_TIMEOUT_S)
+            
+            if matched == "Homing complete":
+                st.session_state["carousel_homed"] = True
+                print("[HOME] Homing complete — will not home again this session.")
+            
+            elif matched == "IGNORED":
+                st.session_state["carousel_homed"] = True
+                print("[HOME] ESP32 already past startup phase. Assuming already homed.")
+                
+            else:
                 ser.close()
-                return {"success": False, "message": "Homing timed out.", "inventory": "UNKNOWN"}
-            st.session_state["carousel_homed"] = True
-            print("[HOME] Homing complete — will not home again this session.")
+                return {"success": False, "message": "Homing timed out. Is the ESP32 connected?", "inventory": "UNKNOWN"}
         else:
             print("[HOME] Already homed this session — skipping.")
 
