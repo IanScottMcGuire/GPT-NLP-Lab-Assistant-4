@@ -28,7 +28,7 @@ import csv
 from datetime import datetime
 
 # ── Default serial port ──────────────────────────────────────────────────────
-DEFAULT_PORT = "/dev/ttyTHS1"
+DEFAULT_PORT = "/dev/ttyUSB0"
 DEFAULT_BAUD = 115200
 
 # ── CSV log file (saved next to this script) ─────────────────────────────────
@@ -177,13 +177,13 @@ def print_status():
 def print_help():
     print("""
 Commands:
-  h          - Home carousel (find BIN0)
+  h          - Home carousel (find BIN0) [Accepted by ESP32 only at startup]
+  toggle     - Toggle motor driver enable [Accepted by ESP32 only at startup]
   bin0..bin3 - Move to bin 0, 1, 2, or 3
   i          - Run inventory sensing (after gate re-arms)
-  e          - E-stop motor immediately
   status     - Show local state summary
   help       - This help message
-  quit       - Exit script
+  quit       - Exit script and reset ESP32 state
 """)
 
 
@@ -251,9 +251,8 @@ def main():
                 continue
 
             if user_input == "quit":
-                for i in range(20):
-                  send_command(ser,"quit")
-                print("Exiting.")
+                send_command(ser,"quit")
+                print("Exiting and resetting ESP32.")
                 break
 
             if user_input == "help":
@@ -264,18 +263,18 @@ def main():
                 print_status()
                 continue
 
-            if user_input == "e":
-                print("[LOCAL] Sending E-STOP...")
-                send_command(ser, "e")
+            if user_input == "toggle":
+                send_command(ser, "toggle")
                 continue
 
             if user_input == "h":
+                if state["homed"]:
+                    print("[LOCAL] Note: ESP32 only accepts 'h' at startup. It may ignore this command.")
                 if state["gate_blocked"]:
-                    confirm = input("[WARN] Gate appears blocked. Home anyway? (y/n): ").strip().lower()
+                    confirm = input("[WARN] Gate appears blocked. Send 'h' anyway? (y/n): ").strip().lower()
                     if confirm != "y":
                         continue
-                for i in range(20):
-                  send_command(ser,"h")
+                send_command(ser,"h")
                 continue
 
             if user_input == "i":
@@ -284,8 +283,7 @@ def main():
                 elif state["gate_blocked"]:
                     print("[LOCAL] Gate is BLOCKED. Push bin fully in first.")
                 else:
-                    for i in range(20):
-                    	send_command(ser, "i")
+                    send_command(ser, "i")
                 continue
 
             if user_input in ("bin0", "bin1", "bin2", "bin3"):
@@ -296,16 +294,15 @@ def main():
                 elif not state["homed"]:
                     print("[LOCAL] Not homed. Send 'h' first.")
                 else:
-                    for i in range(20):
-                    	send_command(ser, user_input)
+                    send_command(ser, user_input)
                 continue
 
             print(f"[LOCAL] Unknown command '{user_input}'. Type 'help' for options.")
 
     except KeyboardInterrupt:
-        print("\nKeyboardInterrupt. Sending E-stop...")
+        print("\nKeyboardInterrupt. Sending quit")
         try:
-            send_command(ser, "e")
+            send_command(ser, "quit")
         except Exception:
             pass
 
