@@ -11,9 +11,9 @@
 // ============================================================
 
 // ===== Motor driver pins =====
-const int PUL_PIN = 4;
-const int DIR_PIN = 5;
-const int EN_PIN  = 6;   // Stepper driver enable pin
+const int PUL_PIN = 21;
+const int DIR_PIN = 3;
+const int EN_PIN  = 2;   // Stepper driver enable pin
 
 // ===== ESP32 boot button pin =====
 constexpr int BOOT_BTN_PIN = 0;  // GPIO0 strap/button

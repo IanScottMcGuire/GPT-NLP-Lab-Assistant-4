@@ -97,6 +97,7 @@ def _open_serial() -> serial.Serial | None:
 
 
 def _send(ser: serial.Serial, cmd: str):
+    """Send a single command followed by newline."""
     ser.write((cmd + "\n").encode("utf-8"))
     ser.flush()
     print(f"[SERIAL] Sent: {cmd}")
@@ -119,6 +120,29 @@ def _wait_for(ser: serial.Serial, target: str, timeout_s: float) -> tuple[bool, 
                 print(f"[SERIAL] Read error: {e}")
         time.sleep(0.01)
     return False, lines
+
+
+def _wait_for_any(ser: serial.Serial, targets: list[str], timeout_s: float) -> tuple[str | None, list[str]]:
+    """
+    Read lines until any string in targets is found or timeout.
+    Returns (matched_target_or_None, all_lines_read).
+    """
+    deadline = time.time() + timeout_s
+    lines = []
+    while time.time() < deadline:
+        if ser.in_waiting:
+            try:
+                raw = ser.readline().decode("utf-8", errors="replace").strip()
+                if raw:
+                    print(f"[ESP32] {raw}")
+                    lines.append(raw)
+                    for t in targets:
+                        if t in raw:
+                            return t, lines
+            except Exception as e:
+                print(f"[SERIAL] Read error: {e}")
+        time.sleep(0.01)
+    return None, lines
 
 
 def _log_inventory(result: str, distance: str, bin_num: int):
@@ -147,30 +171,42 @@ def _get_last_inventory(bin_num: int) -> str | None:
 
 def _inventory_background(ser: serial.Serial, gate_lines: list, bin_num: int):
     """
-    Sends 'i' and logs the inventory result silently in a background thread.
-    Called after the user has already taken their component — UI doesn't wait for this.
+    Sends 'i' once and waits for the firmware's HI/LO + distance output.
+
+    The firmware prints (in order):
+      "HI" or "LO"
+      "(Distance(cm) = X.XXX)"
+
+    We use "(Distance(cm)" as the termination sentinel since it is always the
+    last line the firmware emits for an inventory cycle.
+
     Closes the serial port when done.
     """
     try:
-        for _ in range(20):
-            _send(ser, "i")
-        _, inv_lines = _wait_for(ser, "Inventory complete", INV_TIMEOUT_S)
+        # Send the inventory command exactly once
+        _send(ser, "i")
+
+        # Wait until the distance line appears — that is always the last line
+        _, inv_lines = _wait_for(ser, "Distance(cm)", INV_TIMEOUT_S)
 
         inv_result   = "UNKNOWN"
         inv_distance = "N/A"
+
         for line in gate_lines + inv_lines:
-            if line == "HI":
+            if line.strip() == "HI":
                 inv_result = "HI"
-            elif line == "LO":
+            elif line.strip() == "LO":
                 inv_result = "LO"
-            elif line.startswith("(Distance(cm)"):
+            elif "Distance(cm)" in line:
                 try:
+                    # Line format: "(Distance(cm) = 8.123)"
                     inv_distance = line.strip("()").split("=")[-1].strip()
                 except Exception:
                     pass
 
         _log_inventory(inv_result, inv_distance, bin_num)
         print(f"[INV] bin{bin_num} → {inv_result} ({inv_distance} cm)")
+
     finally:
         ser.close()
 
@@ -178,7 +214,7 @@ def _inventory_background(ser: serial.Serial, gate_lines: list, bin_num: int):
 def dispense_component(component_key: str) -> dict:
     """
     Phase 1 (blocks inside st.spinner):
-      - Home carousel
+      - Home carousel (once per session)
       - Move to bin
       - Wait for user to pull bin, take component, reinsert bin (GATE: Ready)
 
@@ -186,7 +222,7 @@ def dispense_component(component_key: str) -> dict:
     UI immediately clears and shows success.
 
     Phase 2 (fire-and-forget background thread):
-      - Send 'i', wait for Inventory complete, log HI/LO to CSV.
+      - Send 'i', wait for HI/LO + distance line, log result to CSV.
       - User never waits for this — it runs silently after the UI is already free.
     """
     bin_num      = COMPONENT_TO_BIN.get(component_key)
@@ -200,20 +236,36 @@ def dispense_component(component_key: str) -> dict:
         return {"success": False, "message": "Could not open serial port.", "inventory": "UNKNOWN"}
 
     try:
+
         # Step 1: Home — only runs once per UI session
  #       """
+        # ── Step 1: Home ───────────────────────────────────────────
         if not st.session_state.get("carousel_homed", False):
-            for _ in range(20):
-                _send(ser, "h")
-            ok, _ = _wait_for(ser, "Homing complete", HOME_TIMEOUT_S)
-            if not ok:
+            
+            # 1. Give the ESP32 a brief moment in case opening the port triggered a reset
+            time.sleep(1.5) 
+            
+            # 2. Send the home command
+            _send(ser, "h") 
+            
+            # 3. Look for EITHER a successful home OR the ESP32 rejecting it because it's already running
+            matched, _ = _wait_for_any(ser, ["Homing complete", "IGNORED"], HOME_TIMEOUT_S)
+            
+            if matched == "Homing complete":
+                st.session_state["carousel_homed"] = True
+                print("[HOME] Homing complete — will not home again this session.")
+            
+            elif matched == "IGNORED":
+                st.session_state["carousel_homed"] = True
+                print("[HOME] ESP32 already past startup phase. Assuming already homed.")
+                
+            else:
                 ser.close()
-                return {"success": False, "message": "Homing timed out.", "inventory": "UNKNOWN"}
-            st.session_state["carousel_homed"] = True
-            print("[HOME] Homing complete — will not home again this session.")
+                return {"success": False, "message": "Homing timed out. Is the ESP32 connected?", "inventory": "UNKNOWN"}
         else:
             print("[HOME] Already homed this session — skipping.")
- #	"""
+
+
         # Step 2: Move to bin
         for _ in range(20):
             _send(ser, f"bin{bin_num}")
@@ -222,19 +274,42 @@ def dispense_component(component_key: str) -> dict:
             ser.close()
             return {"success": False, "message": f"Failed to move to bin {bin_num}.", "inventory": "UNKNOWN"}
 
-        # Step 3: Wait for user to pull bin, take component, reinsert bin
+
+        # ── Step 2: Move to bin ────────────────────────────────────
+        # Firmware rejects bin moves when GATE_LOCKOUT or INVENTORY_REQUIRED.
+        # We check for those error responses so we can surface a clear message
+        # instead of just timing out.
+        _send(ser, f"bin{bin_num}")  # send once
+        matched, move_lines = _wait_for_any(
+            ser,
+            targets=[f"Now at BIN{bin_num}", "GATE LOCKOUT", "INVENTORY REQUIRED"],
+            timeout_s=MOVE_TIMEOUT_S,
+        )
+
+
+        if matched is None:
+            ser.close()
+            return {"success": False, "message": f"Timed out waiting to reach bin {bin_num}.", "inventory": "UNKNOWN"}
+        if matched == "GATE LOCKOUT":
+            ser.close()
+            return {"success": False, "message": "Gate is currently blocked. Please clear the gate and try again.", "inventory": "UNKNOWN"}
+        if matched == "INVENTORY REQUIRED":
+            ser.close()
+            return {"success": False, "message": "An inventory check is required before the next dispense. Please contact a lab assistant.", "inventory": "UNKNOWN"}
+
+        # ── Step 3: Wait for user to pull bin, take component, reinsert ──
         ok, gate_lines = _wait_for(ser, "GATE: Ready", GATE_TIMEOUT_S)
         if not ok:
             ser.close()
             return {"success": False, "message": "Timed out waiting for bin to be reinserted.", "inventory": "UNKNOWN"}
 
-        # User has their component — hand off to background thread for inventory sensing.
+        # User has their component — hand off to background thread for inventory.
         # Do NOT close ser here — the background thread owns it and will close it.
         import threading
         t = threading.Thread(
             target=_inventory_background,
             args=(ser, gate_lines, bin_num),
-            daemon=True
+            daemon=True,
         )
         t.start()
 
@@ -408,14 +483,18 @@ detector.set_input_block_message("Input blocked: {matched_keywords}")
 detector.set_output_block_message("Output blocked: {matched_keywords}")
 
 
-
 # ═══════════════════════════════════════════════════════════
 #                   CAMERA VISION
 # ═══════════════════════════════════════════════════════════
 
+
 # Path to the camera vision script (same folder as this file)
 VISION_SCRIPT      = "/home/am1/GPT-NLP-Lab-Assistant-4/Raquel's Folder/403model/camera_local.py"
 VISION_RESULT_FILE = "/home/am1/GPT-NLP-Lab-Assistant-4/Raquel's Folder/403model/prediction_result.txt"
+
+VISION_SCRIPT      = "/home/am1/Raquel/403model.py"
+VISION_RESULT_FILE = "/home/am1/Raquel/prediction_result.txt"
+
 
 
 def scan_component() -> dict:
@@ -423,19 +502,12 @@ def scan_component() -> dict:
     Runs the camera vision script as a subprocess and reads the result string
     it writes to prediction_result.txt.
 
-    The vision script handles everything: camera warm-up, inference against
-    the local Roboflow Docker server, averaging, and writing the final
-    component name to prediction_result.txt as "class,confidence".
-
     Returns { "success": bool, "component": str, "message": str }
     """
-    # Remove stale result file so we don't accidentally read a previous run
     if os.path.exists(VISION_RESULT_FILE):
         os.remove(VISION_RESULT_FILE)
 
     try:
-        # Run the vision script synchronously — blocks until it completes
-        # Pass HEADLESS=1 so the vision script skips all cv2.imshow/waitKey calls
         env = os.environ.copy()
         env["HEADLESS"] = "1"
         result = subprocess.run(
@@ -456,7 +528,6 @@ def scan_component() -> dict:
     except Exception as e:
         return {"success": False, "component": "", "message": f"Camera vision error: {e}"}
 
-    # Read the result file written by the vision script
     if not os.path.exists(VISION_RESULT_FILE):
         return {"success": False, "component": "",
                 "message": "Vision script ran but produced no result file."}
@@ -464,7 +535,6 @@ def scan_component() -> dict:
     try:
         with open(VISION_RESULT_FILE, "r") as f:
             line = f.read().strip()
-        # Format is "class,confidence" e.g. "1k-resistor,0.8732"
         component = line.split(",")[0].strip()
         if not component or component == "none":
             return {"success": False, "component": "",
@@ -473,6 +543,7 @@ def scan_component() -> dict:
                 "message": f"Detected: {component}"}
     except Exception as e:
         return {"success": False, "component": "", "message": f"Could not read result: {e}"}
+
 
 # ═══════════════════════════════════════════════════════════
 #                       ADMIN PAGES
@@ -622,7 +693,6 @@ def _render_chat_history():
         if msg["role"] == "system":
             continue
         with st.chat_message(msg["role"]):
-            # If the message has an image attached, show it
             if msg.get("image") is not None:
                 st.image(msg["image"], caption="Camera scan", width=320)
             st.write(msg["content"])
@@ -727,7 +797,6 @@ def chatbot_page(index, texts, embed_model, faqs):
     with col_scan:
         scan_clicked = st.button("📷 Scan")
 
-    # Scan logic runs outside the column so chat messages render full width
     if scan_clicked:
         with st.spinner("Scanning component... please wait."):
             scan = scan_component()
@@ -806,7 +875,6 @@ def chatbot_page(index, texts, embed_model, faqs):
     if local_answer:
         _add_to_history("user", user_input)
         _add_to_history("assistant", local_answer)
-        # Rerender history with new messages — no st.rerun() to avoid loop
         with st.chat_message("user"):
             st.write(user_input)
         with st.chat_message("assistant"):
@@ -818,7 +886,6 @@ def chatbot_page(index, texts, embed_model, faqs):
     # 4. RAG + LLM with full chat history
     _add_to_history("user", user_input)
     context = retrieve_context(user_input, index, texts, embed_model)
-    # Inject RAG context as a system note — not visible in chat history
     messages = _llm_messages()
     if context:
         messages.insert(1, {
@@ -829,7 +896,7 @@ def chatbot_page(index, texts, embed_model, faqs):
         with st.spinner("Thinking..."):
             answer = query_tamuai(messages)
     except Exception as e:
-        st.session_state["chat_history"].pop()  # remove the user msg we just added
+        st.session_state["chat_history"].pop()
         st.error(f"LLM request failed: {e}")
         return
 
@@ -842,7 +909,6 @@ def chatbot_page(index, texts, embed_model, faqs):
         return
 
     _add_to_history("assistant", answer)
-    # Render the new exchange directly — no st.rerun() to avoid loop
     with st.chat_message("user"):
         st.write(user_input)
     with st.chat_message("assistant"):
@@ -878,15 +944,20 @@ def main():
     st.session_state.setdefault("admin_logged_in", False)
     st.session_state.setdefault("carousel_homed", False)
 
+
     # Home the carousel once at startup if not already done
   #  """
+
+    # Home the carousel once at startup if not already done.
+    # NOTE: 'h' is only accepted by the firmware before any other commands,
+    # so we must send it before the user makes any dispense requests.
+
     if not st.session_state["carousel_homed"]:
         with st.spinner("Homing carousel on startup..."):
             ser = _open_serial()
             if ser:
                 try:
-                    for _ in range(20):
-                        _send(ser, "h")
+                    _send(ser, "h")  # send once — do not spam
                     ok, _ = _wait_for(ser, "Homing complete", HOME_TIMEOUT_S)
                     if ok:
                         st.session_state["carousel_homed"] = True
@@ -900,7 +971,6 @@ def main():
     # """
     embed_model = None
     try:
-        # Force CPU to avoid competing with Whisper for Jetson shared GPU memory
         embed_model = SentenceTransformer(MODEL_NAME, device="cpu")
     except Exception as e:
         st.error(f"Embedding model failed: {e}")
