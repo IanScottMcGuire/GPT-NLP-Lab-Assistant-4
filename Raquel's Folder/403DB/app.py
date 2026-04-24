@@ -6,7 +6,7 @@ import signal
 from datetime import timedelta, datetime
 from functools import wraps
 
-CSV_PATH = "/home/raquel/Documents/GPT-NLP-Lab-Assistant-4/Adiba's Folder/inventory_log.csv"
+CSV_PATH = "/home/am1/GPT-NLP-Lab-Assistant-4/Adiba's Folder/inventory_log.csv"
 
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-change-in-production'

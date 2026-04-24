@@ -43,7 +43,7 @@ WHISPER_MODEL     = "base"
 WHISPER_DEVICE    = "cuda"
 
 # ── UART ─────────────────────────────────────────────────────
-SERIAL_PORT = "/dev/ttyTHS1"
+SERIAL_PORT = "/dev/ttyUSB0"
 BAUD_RATE   = 115200
 
 # ── CSV log ───────────────────────────────────────────────────
@@ -169,159 +169,131 @@ def _get_last_inventory(bin_num: int) -> str | None:
     return last
 
 
-def _inventory_background(ser: serial.Serial, gate_lines: list, bin_num: int):
+def move_to_bin(component_key: str) -> dict:
     """
-    Sends 'i' once and waits for the firmware's HI/LO + distance output.
-
-    The firmware prints (in order):
-      "HI" or "LO"
-      "(Distance(cm) = X.XXX)"
-
-    We use "(Distance(cm)" as the termination sentinel since it is always the
-    last line the firmware emits for an inventory cycle.
-
-    Closes the serial port when done.
+    Phase 1: Home carousel (once per session) + move to bin.
+    Returns success once ESP32 confirms "Now at BIN{n}".
+    Does NOT wait for gate/beam — that's handled by the UI after user confirms.
     """
+    bin_num      = COMPONENT_TO_BIN.get(component_key)
+    display_name = COMPONENT_DISPLAY.get(component_key, component_key)
+
+    if bin_num is None:
+        return {"success": False, "message": f"No bin mapped for '{component_key}'.", "bin_num": -1}
+
+    ser = _open_serial()
+    if ser is None:
+        return {"success": False, "message": "Could not open serial port.", "bin_num": -1}
+
     try:
-        # Send the inventory command exactly once
-        _send(ser, "i")
+        # ── Step 1: Guard — carousel must have been homed at startup ─
+        if not st.session_state.get("carousel_homed", False):
+            ser.close()
+            return {"success": False, "message": "Carousel was not homed. Please restart the application.", "bin_num": -1}
 
-        # Wait until the distance line appears — that is always the last line
+        # ── Step 2: Move to bin ────────────────────────────────────
+        _send(ser, f"bin{bin_num}")
+        matched, _ = _wait_for_any(
+            ser,
+            targets=[f"Now at BIN{bin_num}", "GATE LOCKOUT", "INVENTORY REQUIRED"],
+            timeout_s=MOVE_TIMEOUT_S,
+        )
+
+        if matched is None:
+            ser.close()
+            return {"success": False, "message": f"Timed out waiting to reach bin {bin_num}.", "bin_num": -1}
+        if matched == "GATE LOCKOUT":
+            ser.close()
+            return {"success": False, "message": "Gate is currently blocked. Please clear the gate and try again.", "bin_num": -1}
+        if matched == "INVENTORY REQUIRED":
+            ser.close()
+            return {"success": False, "message": "An inventory check is required before the next dispense. Please contact a lab assistant.", "bin_num": -1}
+
+        # Bin reached — close serial and let UI take over
+        ser.close()
+        return {"success": True, "message": f"Bin {bin_num} ready. Please grab your {display_name}.", "bin_num": bin_num}
+
+    except Exception as e:
+        ser.close()
+        return {"success": False, "message": f"Dispense error: {e}", "bin_num": -1}
+
+
+def send_inventory_command(bin_num: int) -> dict:
+    """
+    Phase 2: Called after user clicks 'Are you finished?'.
+    Sends 'i' to ESP32, waits for HI/LO + distance, logs result.
+    """
+    ser = _open_serial()
+    if ser is None:
+        return {"success": False, "message": "Could not open serial port for inventory."}
+
+    try:
+        _send(ser, "i")
         _, inv_lines = _wait_for(ser, "Distance(cm)", INV_TIMEOUT_S)
 
         inv_result   = "UNKNOWN"
         inv_distance = "N/A"
 
-        for line in gate_lines + inv_lines:
+        for line in inv_lines:
             if line.strip() == "HI":
                 inv_result = "HI"
             elif line.strip() == "LO":
                 inv_result = "LO"
             elif "Distance(cm)" in line:
                 try:
-                    # Line format: "(Distance(cm) = 8.123)"
                     inv_distance = line.strip("()").split("=")[-1].strip()
                 except Exception:
                     pass
 
         _log_inventory(inv_result, inv_distance, bin_num)
         print(f"[INV] bin{bin_num} → {inv_result} ({inv_distance} cm)")
+        return {"success": True, "result": inv_result, "distance": inv_distance}
 
+    except Exception as e:
+        return {"success": False, "message": f"Inventory error: {e}"}
     finally:
         ser.close()
 
 
+# Legacy wrapper kept for any callers not yet updated
 def dispense_component(component_key: str) -> dict:
+    return move_to_bin(component_key)
+
+
+def send_estop() -> dict:
     """
-    Phase 1 (blocks inside st.spinner):
-      - Home carousel (once per session)
-      - Move to bin
-      - Wait for user to pull bin, take component, reinsert bin (GATE: Ready)
-
-    Once GATE: Ready is received the user already has their component.
-    UI immediately clears and shows success.
-
-    Phase 2 (fire-and-forget background thread):
-      - Send 'i', wait for HI/LO + distance line, log result to CSV.
-      - User never waits for this — it runs silently after the UI is already free.
+    Send 'e' to ESP32 to trigger the latched E-STOP.
+    Does not wait for a response — the ESP32 picks it up mid-motion.
     """
-    bin_num      = COMPONENT_TO_BIN.get(component_key)
-    display_name = COMPONENT_DISPLAY.get(component_key, component_key)
-
-    if bin_num is None:
-        return {"success": False, "message": f"No bin mapped for '{component_key}'.", "inventory": "UNKNOWN"}
-
     ser = _open_serial()
     if ser is None:
-        return {"success": False, "message": "Could not open serial port.", "inventory": "UNKNOWN"}
-
+        return {"success": False, "message": "Could not open serial port for E-STOP."}
     try:
-
-        # Step 1: Home — only runs once per UI session
- #       """
-        # ── Step 1: Home ───────────────────────────────────────────
-        if not st.session_state.get("carousel_homed", False):
-            
-            # 1. Give the ESP32 a brief moment in case opening the port triggered a reset
-            time.sleep(1.5) 
-            
-            # 2. Send the home command
-            _send(ser, "h") 
-            
-            # 3. Look for EITHER a successful home OR the ESP32 rejecting it because it's already running
-            matched, _ = _wait_for_any(ser, ["Homing complete", "IGNORED"], HOME_TIMEOUT_S)
-            
-            if matched == "Homing complete":
-                st.session_state["carousel_homed"] = True
-                print("[HOME] Homing complete — will not home again this session.")
-            
-            elif matched == "IGNORED":
-                st.session_state["carousel_homed"] = True
-                print("[HOME] ESP32 already past startup phase. Assuming already homed.")
-                
-            else:
-                ser.close()
-                return {"success": False, "message": "Homing timed out. Is the ESP32 connected?", "inventory": "UNKNOWN"}
-        else:
-            print("[HOME] Already homed this session — skipping.")
-
-
-        # Step 2: Move to bin
-        for _ in range(20):
-            _send(ser, f"bin{bin_num}")
-        ok, _ = _wait_for(ser, f"Done. Now at BIN{bin_num}", MOVE_TIMEOUT_S)
-        if not ok:
-            ser.close()
-            return {"success": False, "message": f"Failed to move to bin {bin_num}.", "inventory": "UNKNOWN"}
-
-
-        # ── Step 2: Move to bin ────────────────────────────────────
-        # Firmware rejects bin moves when GATE_LOCKOUT or INVENTORY_REQUIRED.
-        # We check for those error responses so we can surface a clear message
-        # instead of just timing out.
-        _send(ser, f"bin{bin_num}")  # send once
-        matched, move_lines = _wait_for_any(
-            ser,
-            targets=[f"Now at BIN{bin_num}", "GATE LOCKOUT", "INVENTORY REQUIRED"],
-            timeout_s=MOVE_TIMEOUT_S,
-        )
-
-
-        if matched is None:
-            ser.close()
-            return {"success": False, "message": f"Timed out waiting to reach bin {bin_num}.", "inventory": "UNKNOWN"}
-        if matched == "GATE LOCKOUT":
-            ser.close()
-            return {"success": False, "message": "Gate is currently blocked. Please clear the gate and try again.", "inventory": "UNKNOWN"}
-        if matched == "INVENTORY REQUIRED":
-            ser.close()
-            return {"success": False, "message": "An inventory check is required before the next dispense. Please contact a lab assistant.", "inventory": "UNKNOWN"}
-
-        # ── Step 3: Wait for user to pull bin, take component, reinsert ──
-        ok, gate_lines = _wait_for(ser, "GATE: Ready", GATE_TIMEOUT_S)
-        if not ok:
-            ser.close()
-            return {"success": False, "message": "Timed out waiting for bin to be reinserted.", "inventory": "UNKNOWN"}
-
-        # User has their component — hand off to background thread for inventory.
-        # Do NOT close ser here — the background thread owns it and will close it.
-        import threading
-        t = threading.Thread(
-            target=_inventory_background,
-            args=(ser, gate_lines, bin_num),
-            daemon=True,
-        )
-        t.start()
-
-        return {
-            "success": True,
-            "message": f"{display_name} dispensed successfully.",
-            "inventory": "UNKNOWN",  # logged async — check CSV for result
-        }
-
+        _send(ser, "e")
+        print("[ESTOP] 'e' sent to ESP32.")
+        return {"success": True}
     except Exception as e:
+        return {"success": False, "message": f"E-STOP send error: {e}"}
+    finally:
         ser.close()
-        return {"success": False, "message": f"Dispense error: {e}", "inventory": "UNKNOWN"}
+
+
+def send_quit() -> dict:
+    """
+    Send 'quit' to ESP32 to reset it back to startup/homing state.
+    Called after E-STOP before closing the UI.
+    """
+    ser = _open_serial()
+    if ser is None:
+        return {"success": False, "message": "Could not open serial port for quit."}
+    try:
+        _send(ser, "quit")
+        print("[QUIT] 'quit' sent to ESP32.")
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "message": f"Quit send error: {e}"}
+    finally:
+        ser.close()
 
 
 # ═══════════════════════════════════════════════════════════
@@ -470,11 +442,7 @@ def extract_component_request(text: str) -> str | None:
 #               PROMPT INJECTION DETECTOR
 # ═══════════════════════════════════════════════════════════
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-if GROQ_API_KEY:
-    detector = PromptInjectionDetector(use_groq=True, api_key=GROQ_API_KEY)
-else:
-    detector = PromptInjectionDetector(model_name_or_url="deberta")
+detector = PromptInjectionDetector(model_name_or_url="deberta")
 
 detector.enable_keyword_blocking = True
 detector.add_input_keywords(["ignore all previous", "bypass", "system prompt", "jailbreak", "override"])
@@ -487,14 +455,8 @@ detector.set_output_block_message("Output blocked: {matched_keywords}")
 #                   CAMERA VISION
 # ═══════════════════════════════════════════════════════════
 
-
-# Path to the camera vision script (same folder as this file)
 VISION_SCRIPT      = "/home/am1/GPT-NLP-Lab-Assistant-4/Raquel's Folder/403model/camera_local.py"
 VISION_RESULT_FILE = "/home/am1/GPT-NLP-Lab-Assistant-4/Raquel's Folder/403model/prediction_result.txt"
-
-VISION_SCRIPT      = "/home/am1/Raquel/403model.py"
-VISION_RESULT_FILE = "/home/am1/Raquel/prediction_result.txt"
-
 
 
 def scan_component() -> dict:
@@ -661,13 +623,15 @@ def admin_dashboard_page(faqs):
                 st.rerun()
 
     st.markdown("---")
+    Database = "/home/am1/GPT-NLP-Lab-Assistant-4/Raquel's Folder/403DB/app.py"
+
     if st.button("Open Database"):
         import socket
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             already_running = s.connect_ex(("localhost", 5000)) == 0
         try:
             if not already_running:
-                subprocess.Popen([sys.executable, "db.py"])
+                subprocess.Popen([sys.executable, Database])
                 time.sleep(1)
             webbrowser.open("http://localhost:5000")
         except Exception as e:
@@ -722,12 +686,43 @@ def chatbot_page(index, texts, embed_model, faqs):
     # ── Session state defaults ────────────────────────────────
     st.session_state.setdefault("chat_history", [])
     st.session_state.setdefault("stt_result", "")
+    st.session_state.setdefault("estop_active", False)
+    st.session_state.setdefault("last_tts_text", "")
+    if st.session_state.pop("clear_main_input", False):
+        st.session_state["main_input"] = ""
 
-    # ── Sidebar: FAQs + Clear History ────────────────────────
+    # ── E-STOP maintenance screen (full takeover) ─────────────
+    if st.session_state["estop_active"]:
+        st.error("🚨 **E-STOP ACTIVATED — Maintenance Required**")
+        st.markdown(
+            "The carousel has been emergency-stopped. "
+            "Please inspect the hardware before resuming.\n\n"
+            "Press **Quit & Restart** to send the reset command to the ESP32 and close the application."
+        )
+        if st.button("🔴 Quit & Restart", type="primary"):
+            send_quit()
+            st.session_state["estop_active"] = False
+            st.session_state["carousel_homed"] = False
+            st.info("ESP32 reset command sent. Please restart the application manually.")
+            st.stop()
+        return  # nothing else renders while E-STOP is active
+
+    # ── Sidebar: E-STOP + FAQs + Clear History ───────────────
     with st.sidebar:
+        # E-STOP button — always visible at top of sidebar
+        if st.button("🛑 E-STOP", use_container_width=True, type="primary"):
+            send_estop()
+            st.session_state["estop_active"] = True
+            st.session_state.pop("pending_dispense", None)
+            st.session_state.pop("awaiting_grab_confirm", None)
+            # Do NOT touch carousel_homed here — main() would re-trigger homing on rerun
+            st.rerun()
+
+        st.markdown("---")
         if st.button("🗑 Clear Chat History", use_container_width=True):
             st.session_state["chat_history"] = []
             st.session_state["stt_result"] = ""
+            st.session_state["last_tts_text"] = ""
             st.session_state.pop("prefilled_question", None)
             st.session_state.pop("prefilled_answer", None)
             st.rerun()
@@ -749,7 +744,7 @@ def chatbot_page(index, texts, embed_model, faqs):
         else:
             st.error(msg)
 
-    # ── Confirm dispense dialog (separate from chat) ──────────
+    # ── Confirm dispense dialog ───────────────────────────────
     if "pending_dispense" in st.session_state:
         comp_key  = st.session_state["pending_dispense"]
         comp_name = COMPONENT_DISPLAY.get(comp_key, comp_key)
@@ -758,11 +753,17 @@ def chatbot_page(index, texts, embed_model, faqs):
         with c1:
             if st.button("✅ Confirm"):
                 st.session_state.pop("pending_dispense")
-                with st.spinner(f"Dispensing {comp_name}... please wait."):
-                    result = dispense_component(comp_key)
-                st.session_state["dispense_result"] = (
-                    f"✅ {result['message']}" if result["success"] else f"❌ {result['message']}"
-                )
+                with st.spinner(f"Moving carousel to {comp_name}... please wait."):
+                    result = move_to_bin(comp_key)
+                if result["success"]:
+                    # Store bin num so the finish button knows what to inventory
+                    st.session_state["awaiting_grab_confirm"] = {
+                        "component_key": comp_key,
+                        "bin_num": result["bin_num"],
+                        "display_name": comp_name,
+                    }
+                else:
+                    st.session_state["dispense_result"] = f"❌ {result['message']}"
                 st.session_state["stt_result"] = ""
                 st.session_state.pop("prefilled_question", None)
                 st.session_state.pop("prefilled_answer", None)
@@ -775,11 +776,52 @@ def chatbot_page(index, texts, embed_model, faqs):
                 st.rerun()
         return
 
+    # ── "Grab your component" + "Are you finished?" dialog ───
+    if "awaiting_grab_confirm" in st.session_state:
+        grab_info  = st.session_state["awaiting_grab_confirm"]
+        comp_name  = grab_info["display_name"]
+        bin_num    = grab_info["bin_num"]
+
+        st.info(
+            f"🟢 **Bin {bin_num} is open.** Please grab your **{comp_name}** now, "
+            f"then reinsert the bin and click the button below."
+        )
+
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("✅ Are you finished?"):
+                st.session_state.pop("awaiting_grab_confirm")
+                with st.spinner("Running inventory check..."):
+                    inv = send_inventory_command(bin_num)
+                if inv.get("success"):
+                    st.session_state["dispense_result"] = (
+                        f"✅ {comp_name} dispensed successfully. "
+                        f"(Inventory: {inv['result']}, {inv['distance']} cm)"
+                    )
+                else:
+                    # Dispense was still successful — inventory just failed to log
+                    st.session_state["dispense_result"] = (
+                        f"✅ {comp_name} dispensed. "
+                        f"(Inventory check failed: {inv.get('message', 'unknown error')})"
+                    )
+                st.rerun()
+        with c2:
+            if st.button("❌ Cancel / Abort"):
+                st.session_state.pop("awaiting_grab_confirm")
+                st.session_state["dispense_result"] = f"⚠️ Dispense of {comp_name} cancelled after bin reached."
+                st.rerun()
+        return
+
     # ── Render chat history ───────────────────────────────────
     _render_chat_history()
 
+    if st.session_state["last_tts_text"]:
+        if st.button("▶ Play last response"):
+            speak_text(st.session_state["last_tts_text"])
+
     # ── Input row: text + speak + scan ───────────────────────
     col_input, col_speak, col_scan = st.columns([5, 1, 1])
+
 
     with col_speak:
         if st.button("🎤 Speak"):
@@ -823,24 +865,24 @@ def chatbot_page(index, texts, embed_model, faqs):
 
     with col_input:
         current_input = st.session_state.get("stt_result") or st.session_state.get("prefilled_question", "")
-        user_input = st.text_input("Ask a question or request a component:", value=current_input, key="main_input")
+        user_input = st.text_input("Ask a question:", value=current_input, key="main_input")
 
-    # ── Manual component dropdown ─────────────────────────────
-    with st.expander("Or select a component manually"):
-        component_options = {"Select...": None} | {v: k for k, v in COMPONENT_DISPLAY.items()}
-        selected_display = st.selectbox("Component", list(component_options.keys()))
-        if st.button("Request Component") and component_options[selected_display]:
-            component_key = component_options[selected_display]
-            bin_num       = COMPONENT_TO_BIN[component_key]
-            comp_name     = COMPONENT_DISPLAY.get(component_key, component_key)
-            last_inv      = _get_last_inventory(bin_num)
-            if last_inv == "LO":
-                st.error(f"**{comp_name}** is out of stock. Please ask a lab assistant to restock bin {bin_num}.")
-            else:
-                st.session_state["pending_dispense"] = component_key
-                st.rerun()
+    # ── Component request dropdown (only way to request a component) ──
+    st.markdown("**Request a Component:**")
+    component_options = {"Select...": None} | {v: k for k, v in COMPONENT_DISPLAY.items()}
+    selected_display = st.selectbox("Component", list(component_options.keys()), key="component_select")
+    if st.button("🔧 Request Component") and component_options[selected_display]:
+        component_key = component_options[selected_display]
+        bin_num       = COMPONENT_TO_BIN[component_key]
+        comp_name     = COMPONENT_DISPLAY.get(component_key, component_key)
+        last_inv      = _get_last_inventory(bin_num)
+        if last_inv == "LO":
+            st.error(f"**{comp_name}** is out of stock. Please ask a lab assistant to restock bin {bin_num}.")
+        else:
+            st.session_state["pending_dispense"] = component_key
+            st.rerun()
 
-    # ── Process text / voice input ────────────────────────────
+    # ── Process text / voice input (chat only — no component detection) ──
     if not user_input:
         return
 
@@ -848,20 +890,7 @@ def chatbot_page(index, texts, embed_model, faqs):
     st.session_state.pop("prefilled_question", None)
     st.session_state.pop("prefilled_answer", None)
 
-    # 1. Component dispense request
-    component_key = extract_component_request(user_input)
-    if component_key:
-        comp_name = COMPONENT_DISPLAY.get(component_key, component_key)
-        bin_num   = COMPONENT_TO_BIN[component_key]
-        last_inv  = _get_last_inventory(bin_num)
-        if last_inv == "LO":
-            st.error(f"**{comp_name}** is out of stock. Please ask a lab assistant to restock bin {bin_num}.")
-            return
-        st.session_state["pending_dispense"] = component_key
-        st.rerun()
-        return
-
-    # 2. Safety check
+    # 1. Safety check
     is_injection, _ = detector.detect_injection(user_input)
     blocked, _      = detector.check_input_keywords(user_input)
     if is_injection or blocked:
@@ -870,7 +899,7 @@ def chatbot_page(index, texts, embed_model, faqs):
             f.write(f"[{datetime.now()}] {user_input}\n")
         return
 
-    # 3. Local FAQ match — answered inline, also added to chat history
+    # 2. Local FAQ match — answered inline, also added to chat history
     local_answer = match_faq_local(user_input, embed_model, faqs)
     if local_answer:
         _add_to_history("user", user_input)
@@ -879,11 +908,11 @@ def chatbot_page(index, texts, embed_model, faqs):
             st.write(user_input)
         with st.chat_message("assistant"):
             st.write(local_answer)
-        if st.button("▶ Play response"):
-            speak_text(local_answer)
-        return
+        st.session_state["last_tts_text"] = local_answer
+        st.session_state["clear_main_input"] = True
+        st.rerun()
 
-    # 4. RAG + LLM with full chat history
+    # 3. RAG + LLM with full chat history
     _add_to_history("user", user_input)
     context = retrieve_context(user_input, index, texts, embed_model)
     messages = _llm_messages()
@@ -913,8 +942,9 @@ def chatbot_page(index, texts, embed_model, faqs):
         st.write(user_input)
     with st.chat_message("assistant"):
         st.write(answer)
-    if st.button("▶ Play response"):
-        speak_text(answer)
+    st.session_state["last_tts_text"] = answer
+    st.session_state["clear_main_input"] = True
+    st.rerun()
 
 
 # ═══════════════════════════════════════════════════════════
@@ -931,7 +961,7 @@ def main():
         section[data-testid="stSidebar"] { background-color: white !important; }
         div.stButton > button {
             color: white !important;
-            background-color: #444444 !important;
+            background-color: #e57373 !important;
             border-radius: 8px !important;
         }
         div[data-baseweb="input"] > div { background-color: black !important; }
@@ -944,31 +974,25 @@ def main():
     st.session_state.setdefault("admin_logged_in", False)
     st.session_state.setdefault("carousel_homed", False)
 
-
-    # Home the carousel once at startup if not already done
-  #  """
-
-    # Home the carousel once at startup if not already done.
-    # NOTE: 'h' is only accepted by the firmware before any other commands,
-    # so we must send it before the user makes any dispense requests.
-
-    if not st.session_state["carousel_homed"]:
+    # Home the carousel once at startup — skip entirely if E-STOP is active
+    
+    if not st.session_state["carousel_homed"] and not st.session_state.get("estop_active", False):
         with st.spinner("Homing carousel on startup..."):
             ser = _open_serial()
             if ser:
                 try:
-                    _send(ser, "h")  # send once — do not spam
+                    _send(ser, "h")
                     ok, _ = _wait_for(ser, "Homing complete", HOME_TIMEOUT_S)
                     if ok:
                         st.session_state["carousel_homed"] = True
                         print("[HOME] Startup homing complete.")
                     else:
-                        st.warning("Carousel homing timed out at startup. Will retry on first dispense.")
+                        st.warning("Carousel homing timed out at startup. Dispensing will be unavailable this session.")
                 finally:
                     ser.close()
             else:
-                st.warning("Could not open serial port for startup homing. Will retry on first dispense.")
-    # """
+                st.warning("Could not open serial port for startup homing. Dispensing will be unavailable this session.")
+    
     embed_model = None
     try:
         embed_model = SentenceTransformer(MODEL_NAME, device="cpu")

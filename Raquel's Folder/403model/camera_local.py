@@ -22,6 +22,7 @@ INFERENCE_DURATION = 3.0         # seconds, collect predictions
 AVERAGING_DISPLAY_DURATION = 1.5 # seconds to show overlay before closing
 
 OUTPUT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prediction_result.txt")
+CSV_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "predictions.csv")
 
 # Drawing settings
 BOX_COLOR = (0, 255, 0)
@@ -84,7 +85,7 @@ def run_inference(frame):
             "iou_threshold": IOU_THRESHOLD,
         },
         headers={"Expect": ""},
-        timeout=10,
+        timeout=120,
     )
     resp.raise_for_status()
     preds = resp.json().get("predictions", [])
@@ -274,7 +275,7 @@ while time.time() < averaging_end:
 
 # ── Write result ─────────────────────────────────────────────────────────────
 if best_class:
-    result_line = f"{best_class} {avg_conf:.2%}"
+    result_line = f"{best_class}"
 else:
     result_line = "No detections"
 
@@ -283,6 +284,51 @@ with open(OUTPUT_FILE, "w") as f:
 
 print(f"[Result] {result_line}")
 print(f"[Output] Written to {OUTPUT_FILE}")
+
+# ── Write prediction to CSV ───────────────────────────────────────────────────
+import csv
+
+ACTUAL_LABELS = (
+    ["Capacitor"] * 10 +
+    ["Ceramic Capacitor"] * 10 +
+    ["Diode"] * 10 +
+    ["IC"] * 10 +
+    ["LED"] * 10 +
+    ["Photodiode"] * 10 +
+    ["Potentiometer"] * 10 +
+    ["Resistor"] * 10 +
+    ["Transistor"] * 10
+)
+
+# Create CSV with empty "predicted" column if it doesn't exist yet
+if not os.path.exists(CSV_FILE):
+    with open(CSV_FILE, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["predicted", "actual"])
+        for label in ACTUAL_LABELS:
+            writer.writerow(["", label])
+    print(f"[CSV] Created {CSV_FILE}")
+
+# Read existing rows, find the first empty "predicted" cell, fill it in
+with open(CSV_FILE, "r", newline="") as f:
+    rows = list(csv.reader(f))
+
+filled = False
+for i, row in enumerate(rows):
+    if i == 0:  # header
+        continue
+    if row[0] == "":
+        row[0] = best_class if best_class else "No detection"
+        filled = True
+        print(f"[CSV] Wrote '{row[0]}' to row {i} (actual: {row[1]})")
+        break
+
+if not filled:
+    print("[CSV] All predicted cells are already filled.")
+
+with open(CSV_FILE, "w", newline="") as f:
+    writer = csv.writer(f)
+    writer.writerows(rows)
 
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 cap.release()

@@ -1,0 +1,91 @@
+predicted,actual
+Diode,Capacitor
+Diode,Capacitor
+Diode,Capacitor
+Transistor,Capacitor
+Photodiode,Capacitor
+Transistor,Capacitor
+Photodiode,Capacitor
+Capacitor,Capacitor
+Photodiode,Capacitor
+Photodiode,Capacitor
+No detection,Ceramic Capacitor
+Ceramic Capacitor,Ceramic Capacitor
+Ceramic Capacitor,Ceramic Capacitor
+Ceramic Capacitor,Ceramic Capacitor
+Ceramic Capacitor,Ceramic Capacitor
+Ceramic Capacitor,Ceramic Capacitor
+Ceramic Capacitor,Ceramic Capacitor
+Ceramic Capacitor,Ceramic Capacitor
+Ceramic Capacitor,Ceramic Capacitor
+Ceramic Capacitor,Ceramic Capacitor
+No detection,Diode
+Diode,Diode
+No detection,Diode
+No detection,Diode
+Resistor,Diode
+No detection,Diode
+No detection,Diode
+No detection,Diode
+No detection,Diode
+Capacitor,Diode
+Capacitor,IC
+Capacitor,IC
+Capacitor,IC
+No detection,IC
+No detection,IC
+No detection,IC
+Photodiode,IC
+IC,IC
+IC,IC
+IC,IC
+Photodiode,LED
+Capacitor,LED
+No detection,LED
+Photodiode,LED
+Photodiode,LED
+Photodiode,LED
+Photodiode,LED
+IC,LED
+IC,LED
+LED,LED
+LED,Photodiode
+No detection,Photodiode
+No detection,Photodiode
+No detection,Photodiode
+No detection,Photodiode
+No detection,Photodiode
+No detection,Photodiode
+No detection,Photodiode
+No detection,Photodiode
+LED,Photodiode
+Resistor,Potentiometer
+Ceramic Capacitor,Potentiometer
+Photodiode,Potentiometer
+Resistor,Potentiometer
+Capacitor,Potentiometer
+Capacitor,Potentiometer
+Photodiode,Potentiometer
+Ceramic Capacitor,Potentiometer
+LED,Potentiometer
+Capacitor,Potentiometer
+No detection,Resistor
+No detection,Resistor
+No detection,Resistor
+No detection,Resistor
+No detection,Resistor
+No detection,Resistor
+No detection,Resistor
+IC,Resistor
+IC,Resistor
+Potentiometer,Resistor
+Ceramic Capacitor,Transistor
+Resistor,Transistor
+Ceramic Capacitor,Transistor
+Ceramic Capacitor,Transistor
+Ceramic Capacitor,Transistor
+Ceramic Capacitor,Transistor
+Ceramic Capacitor,Transistor
+No detection,Transistor
+Potentiometer,Transistor
+Diode,Transistor

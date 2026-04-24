@@ -1,1 +1,1 @@
-Potentiometer 63.24%
+LED
